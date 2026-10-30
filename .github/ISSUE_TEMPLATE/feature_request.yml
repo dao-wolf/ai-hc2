@@ -1,0 +1,29 @@
+name: Feature request
+description: Suggest an improvement or a new harness.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Privacy first.** This issue is public. Use made-up values for any paths, titles or names.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like HC2 to do?
+    validations:
+      required: true
+  - type: input
+    id: harness
+    attributes:
+      label: Which harness is this about?
+      description: Leave blank if it is not about one harness.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What have you tried or considered?

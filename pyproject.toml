@@ -1,0 +1,70 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ai-hc2"
+dynamic = ["version"]
+description = "One local place to see and steer every AI harness on a developer's machine."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "AI HC2 contributors" }]
+keywords = ["ai", "agents", "harness", "observability", "local-first"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development",
+    "Typing :: Typed",
+]
+# No runtime dependencies: standard library only (see ADR 0001, decision 7).
+dependencies = []
+
+[project.optional-dependencies]
+# Listed so contributors and CI know what to install. Nothing here is needed to run HC2.
+dev = [
+    "coverage>=7.6",
+    "mypy>=1.13",
+    "ruff>=0.8",
+]
+
+[project.scripts]
+hc2 = "hc2.cli:main"
+
+[tool.hatch.version]
+path = "src/hc2/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hc2"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "tests", "docs", "examples", "scripts", "LICENSE", "README.md"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src"]
+
+[tool.coverage.run]
+source = ["hc2"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
+skip_empty = true

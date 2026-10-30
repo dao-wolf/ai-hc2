@@ -1,0 +1,172 @@
+# AI HC2 example configuration.
+#
+# Copy this file to ~/.config/ai-hc2/config.toml (or to $HC2_CONFIG_DIR/config.toml)
+# and change what you need. Every value below is made up.
+#
+# Status: pre-alpha. This file lists the options planned in docs/requirements.md
+# (FR-3, FR-5, FR-16, F-3, Op-2). The code does not read it yet, and names may
+# still change. Precedence once it does (C-1): a command-line flag beats an
+# environment variable, which beats this file, which beats the defaults.
+#
+# The values shown are the intended defaults unless a comment says otherwise.
+
+# Version of this file's layout.
+schema = 1
+
+# ---------------------------------------------------------------------------
+# Privacy
+# ---------------------------------------------------------------------------
+[privacy]
+# Folders whose sessions are confidential. Sessions under these folders are
+# shown as "Confidential A", "Confidential B" and so on, in the order listed.
+# Their titles and paths never appear in any surface, log, export or LLM
+# payload. Each entry matches the folder and everything below it.
+confidential_folders = [
+  "/home/alice/clients/example-client",
+  "/home/alice/legal/example-matter",
+]
+
+# Mask every session title, not only confidential ones.
+redact_all_titles = false
+
+# ---------------------------------------------------------------------------
+# Scanning
+# ---------------------------------------------------------------------------
+[scan]
+# How often a background scan runs, in minutes. 0 means only on request.
+interval_minutes = 15
+
+# Give each adapter this long, in seconds, before it is reported as unknown.
+adapter_timeout_seconds = 5
+
+# While this file exists, HC2 does not start heavy work (F-3). Point it at the
+# lock your own heavy jobs create. Leave it empty to turn the check off.
+heavy_work_lock_file = "/home/alice/.cache/example-heavy-jobs.lock"
+
+# ---------------------------------------------------------------------------
+# Adapters: one switch per harness, plus options.
+# ---------------------------------------------------------------------------
+[adapters]
+claude_code_cli = true
+claude_desktop_code = true
+claude_desktop_cowork = true
+codex = true
+pi = true
+hermes = true
+ollama = true
+lm_studio = true
+cursor = true
+antigravity = true
+
+# Per-adapter options. Look for pi's data here instead of ~/.pi/agent.
+# Leave it empty for the default.
+[adapter_options.pi]
+agent_dir = ""
+
+# ---------------------------------------------------------------------------
+# Rules: a switch and thresholds per rule. A rule that is switched off never
+# runs, and a threshold changes when it raises a finding.
+# ---------------------------------------------------------------------------
+[rules.stale_session]
+enabled = true
+# A session idle for longer than this is stale (FR-3).
+idle_minutes = 120
+
+[rules.memory_pressure]
+enabled = true
+# Raise an amber finding at this share of memory in use, and red at the second.
+amber_percent = 80
+red_percent = 92
+
+[rules.idle_session_memory]
+enabled = true
+# An idle session holding more than this many megabytes is worth a look.
+min_megabytes = 500
+
+[rules.orphaned_process]
+enabled = true
+
+[rules.duplicate_mcp_server]
+enabled = true
+
+[rules.concurrent_test_jobs]
+enabled = true
+# More than this many test workers at once is flagged.
+max_jobs = 3
+
+[rules.hot_process]
+enabled = true
+# A process above this CPU share for this long is flagged.
+cpu_percent = 90
+minutes = 10
+
+[rules.oversized_renderer]
+enabled = true
+min_megabytes = 2048
+
+[rules.model_fit]
+# Information only: a more powerful model than an idle or simple session needs.
+enabled = true
+
+# ---------------------------------------------------------------------------
+# Findings
+# ---------------------------------------------------------------------------
+[findings]
+# Default length of an acknowledgement, in days. 0 means until you remove it.
+acknowledge_days = 14
+
+# ---------------------------------------------------------------------------
+# Local web dashboard
+# ---------------------------------------------------------------------------
+[serve]
+# HC2 always binds to 127.0.0.1. Only the port is configurable.
+port = 8765
+
+# ---------------------------------------------------------------------------
+# Network (off by default; everything here is opt-in, S-1)
+# ---------------------------------------------------------------------------
+[network]
+# Allow checks for the latest harness versions and changes to docs.
+check_versions = false
+check_docs = false
+
+# Hosts HC2 may contact when the switches above are on. Nothing else is allowed.
+allowed_hosts = [
+  "registry.npmjs.org",
+  "api.github.com",
+  "github.com",
+  "code.claude.com",
+  "docs.example.com",
+]
+
+# ---------------------------------------------------------------------------
+# Audit trail and telemetry
+# ---------------------------------------------------------------------------
+[audit]
+# Delete audit files and snapshots older than this many days (Op-2).
+retention_days = 30
+
+[telemetry]
+# Push the audit trail over OTLP/HTTP (FR-15). Off unless you switch it on.
+otlp_export = false
+otlp_endpoint = "http://127.0.0.1:4318"
+
+# HC2 holds no secrets. If your endpoint needs a header, name the environment
+# variable that holds it here. The value is read at run time and never stored.
+otlp_headers_env = ""
+
+# ---------------------------------------------------------------------------
+# Surfaces
+# ---------------------------------------------------------------------------
+[notifications]
+# Notify when a new red finding appears (Mac menu bar app).
+red_findings = false
+
+# ---------------------------------------------------------------------------
+# Plan view (FR-17): off by default.
+# ---------------------------------------------------------------------------
+[plan]
+enabled = false
+# A personal plan file of workstreams, decisions and phases. Keep it outside
+# the repo.
+file = "/home/alice/.config/ai-hc2/plan.json"

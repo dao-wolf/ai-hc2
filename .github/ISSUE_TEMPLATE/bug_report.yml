@@ -1,0 +1,46 @@
+name: Bug report
+description: Something in HC2 does not work as documented.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Privacy first.** This issue is public. Do not paste real session titles, folder paths, names, tokens or conversation content. Replace them with made-up values such as `alice` or `/home/alice/example-project`.
+
+        Found a security problem? Do not use this form. Follow SECURITY.md instead.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you expect, and what did you see instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Run `hc2 doctor`
+        2. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: HC2 version
+      description: The output of `hc2 --version`.
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: OS and Python version
+      placeholder: macOS 14, Python 3.12
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: Paste any output after replacing private values.
+      render: text

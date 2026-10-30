@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Editors and OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# HC2 runtime and personal files never belong in the repo
+.env
+.env.*
+*.db
+*.sqlite
+audit.jsonl
+token
+privacy-denylist.txt
+acknowledged.json
+plan.json
+config.toml
+!examples/config.toml
