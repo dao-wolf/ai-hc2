@@ -1,0 +1,5 @@
+hw.memsize: 17179869184
+hw.ncpu: 8
+vm.swapusage: total = 4096.00M  used = 2048.00M  free = 2048.00M  (encrypted)
+vm.loadavg: { 2.10 2.35 2.40 }
+kern.memorystatus_vm_pressure_level: 2

@@ -1,0 +1,13 @@
+p100
+cExample Agent
+n127.0.0.1:8765
+p300
+cnode
+n*:5173
+n[::1]:5173
+p800
+cnode
+n127.0.0.1:9229 
+p999
+cbroken
+nnot-an-address

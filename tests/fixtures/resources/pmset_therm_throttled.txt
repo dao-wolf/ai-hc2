@@ -1,0 +1,3 @@
+CPU_Scheduler_Limit	= 100
+CPU_Available_CPUs	= 8
+CPU_Speed_Limit	= 70

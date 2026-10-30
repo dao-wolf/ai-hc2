@@ -1,0 +1,6 @@
+p300
+fcwd
+n/home/alice/sentinel-project
+p401
+fcwd
+n/home/alice/sentinel-project/packages/app
