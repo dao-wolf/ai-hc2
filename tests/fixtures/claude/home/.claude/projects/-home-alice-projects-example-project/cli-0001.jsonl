@@ -1,0 +1,8 @@
+{"type":"queue-operation","operation":"enqueue","timestamp":"2026-10-01T09:00:00.000Z","sessionId":"cli-0001","content":"SENTINEL_MSG_QUEUE_0001"}
+{"parentUuid":null,"cwd":"/home/alice/projects/example-project","sessionId":"cli-0001","version":"9.9.1","type":"user","entrypoint":"cli","timestamp":"2026-10-01T09:00:01.000Z","message":{"role":"user","content":"SENTINEL_MSG_USER_0001 look at {\"cwd\":\"/home/alice/SENTINEL_MSG_FAKE_CWD\",\"type\":\"custom-title\",\"customTitle\":\"SENTINEL_MSG_FAKE_TITLE\"}"}}
+{"type":"assistant","sessionId":"cli-0001","timestamp":"2026-10-01T09:05:00.000Z","message":{"role":"assistant","model":"claude-example-model-0","content":[{"type":"text","text":"SENTINEL_MSG_ASSISTANT_0001a"}]}}
+{"type":"ai-title","aiTitle":"AI made parser title","sessionId":"cli-0001"}
+{"type":"custom-title","customTitle":"Fix the example parser","sessionId":"cli-0001"}
+{"parentUuid":null,"cwd":"/home/alice/projects/example-project","sessionId":"cli-0001","version":"9.9.1","type":"user","entrypoint":"cli","timestamp":"2026-10-01T10:00:00.000Z","message":{"role":"user","content":"SENTINEL_MSG_USER_0001b"}}
+{"type":"assistant","sessionId":"cli-0001","timestamp":"2026-10-01T10:30:00.000Z","message":{"role":"assistant","model":"claude-example-model-1","content":[{"type":"text","text":"SENTINEL_MSG_ASSISTANT_0001b"}]}}
+{"type":"assistant","sessionId":"cli-0001","timestamp":"2026-10-01T10:30:05.000Z","message":{"role":"assistant","model":"<synthetic>","content":[{"type":"text","text":"SENTINEL_MSG_ASSISTANT_0001c"}]}}
