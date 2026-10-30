@@ -1,0 +1,2 @@
+{"parentUuid":null,"cwd":"/home/alice/projects/example-project","sessionId":"cli-0006","version":"9.9.1","type":"user","entrypoint":"cli","timestamp":"2026-10-06T08:00:00.000Z","message":{"role":"user","content":"SENTINEL_MSG_USER_0006"}}
+{"type":"assistant","sessionId":"cli-0006","timestamp":"2026-10-06T08:02:00.000Z","message":{"role":"assistant","model":"claude-example-model-1","content":[{"type":"text","text":"SENTINEL_MSG_ASSISTANT_0006"}]}}

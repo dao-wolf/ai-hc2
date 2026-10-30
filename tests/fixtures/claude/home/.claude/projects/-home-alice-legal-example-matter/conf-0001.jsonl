@@ -1,0 +1,3 @@
+{"parentUuid":null,"cwd":"/home/alice/legal/example-matter/sub","sessionId":"conf-0001","version":"9.9.1","type":"user","entrypoint":"cli","timestamp":"2026-10-09T08:00:00.000Z","message":{"role":"user","content":"SENTINEL_MSG_USER_CONF"}}
+{"type":"custom-title","customTitle":"SENTINEL_CONFTITLE_CLI","sessionId":"conf-0001"}
+{"type":"assistant","sessionId":"conf-0001","timestamp":"2026-10-09T08:30:00.000Z","message":{"role":"assistant","model":"claude-example-model-1","content":[{"type":"text","text":"SENTINEL_MSG_ASSISTANT_CONF"}]}}

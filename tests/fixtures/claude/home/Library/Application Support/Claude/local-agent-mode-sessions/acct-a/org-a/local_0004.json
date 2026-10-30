@@ -1,0 +1,1 @@
+{"processName":"example-vm-process","cwd":"/sessions/example-vm/mnt","initialMessage":"SENTINEL_MSG_COWORK_INITIAL","systemPrompt":"SENTINEL_MSG_COWORK_SYSTEM","emailAddress":"alice@example.com","accountName":"Alice Example","egressAllowedDomains":["example.com"],"error":"SENTINEL_MSG_COWORK_ERROR","sessionId":"local_c004","userSelectedFolders":[],"title":"No folder cowork task"}
