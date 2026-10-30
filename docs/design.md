@@ -72,6 +72,7 @@ These follow the XDG layout on macOS too, so the paths are the same on every OS.
 ### 1. Scan
 1. A trigger starts the scan: a timer (default 15 minutes), a file watch on harness indexes (watchers never read file contents), or a request.
 2. Adapters and collectors run in parallel, each with a timeout.
+   - Once both have finished, each session with a `pid` is linked to its process tree: the root process and every descendant get the session's id. The session rules (idle, busy but quiet) then run over those sessions.
 3. Redaction.
 4. Rules.
 5. A diff against the previous scan.

@@ -17,6 +17,12 @@ Steps:
 Resource data comes in through a `Collector`, a function that gets the
 adapters' process signatures and returns `Resources`. Without one, `system` is
 `None` and `processes` is empty.
+
+Once both the adapters and the collector have finished, the scan links each
+session that has a `pid` to its process tree: it sets `session_id` on the
+session's root process and everything below it, then runs the session rules
+(`Resources.session_rules`) over those sessions. The collector runs before the
+sessions are known, so it cannot do this itself.
 """
 
 from __future__ import annotations
@@ -55,7 +61,9 @@ from hc2.model import (
     SystemSample,
     stable_id,
 )
+from hc2.collect.processes import ProcessIndex
 from hc2.redact import Redactor, normalise_folder
+from hc2.rules.resources import SessionActivity
 from hc2.store import FindingRecord, ScanRecord, Store
 from hc2.text import plural
 
@@ -69,13 +77,30 @@ SYSTEM_ACTOR = Actor(ActorType.SYSTEM, "hc2")
 _STALE_CANDIDATES = frozenset({SessionState.RUNNING_IDLE, SessionState.WAITING})
 
 
+SessionRules = Callable[
+    [Sequence[ProcessNode], Sequence[SessionActivity]], tuple[Finding, ...]
+]
+"""Runs the session rules over raw process nodes and the live sessions.
+
+The collector builds one with its thresholds and its "under pressure" reading,
+and the scan calls it once the sessions are known.
+"""
+
+
 @dataclass(frozen=True)
 class Resources:
-    """What a resource collector returns (FR-4)."""
+    """What a resource collector returns (FR-4).
+
+    `session_rules` is optional. When set, the scan calls it with the raw
+    process nodes and a `SessionActivity` for each session that has a `pid`,
+    and adds the findings it returns. The collector's own `findings` must not
+    include what these rules would find, or they would be counted twice.
+    """
 
     system: SystemSample | None = None
     processes: tuple[ProcessNode, ...] = ()
     findings: tuple[Finding, ...] = ()
+    session_rules: SessionRules | None = None
 
 
 Collector = Callable[[Sequence[ProcessSignature]], Resources]
@@ -280,6 +305,52 @@ def _with_state(session: Session, now: datetime, stale_hours: float) -> Session:
     return replace(session, state=SessionState.STALE, field_sources=sources)
 
 
+def session_activities(
+    sessions: Sequence[Session], now: datetime
+) -> list[SessionActivity]:
+    """The session rules' view of each session that has a process id (FR-3).
+
+    `state_age_seconds` is `now` minus `state_since`, or minus `last_activity`
+    when the harness gives no status time, or `None` when there is neither.
+    Sessions without a `pid` are left out: nothing links them to a process.
+    """
+    found: list[SessionActivity] = []
+    for session in sessions:
+        if session.pid is None:
+            continue
+        since = _parse_time(session.state_since) or _parse_time(session.last_activity)
+        age = None if since is None else max(0, int((now - since).total_seconds()))
+        found.append(
+            SessionActivity(
+                session_id=session.id,
+                harness_id=session.harness_id,
+                state=session.state,
+                state_age_seconds=age,
+                root_pid=session.pid,
+            )
+        )
+    return found
+
+
+def link_processes(
+    nodes: Sequence[ProcessNode], activities: Sequence[SessionActivity]
+) -> dict[int, str]:
+    """Map each process id to the session whose tree it is in.
+
+    A session's tree is its root process and every descendant. If a process is
+    in the trees of two sessions, the lowest session id wins, so the answer does
+    not depend on the order the adapters ran in (D-1).
+    """
+    index = ProcessIndex(nodes)
+    linked: dict[int, str] = {}
+    for activity in sorted(activities, key=lambda a: (a.session_id, a.harness_id)):
+        if activity.root_pid is None:
+            continue
+        for node in index.subtree(activity.root_pid):
+            linked.setdefault(node.pid, activity.session_id)
+    return linked
+
+
 def _sorted_sessions(sessions: Sequence[Session]) -> tuple[Session, ...]:
     """Newest activity first, then by id. Sessions without a time go last."""
     by_id = sorted(sessions, key=lambda item: item.id)
@@ -345,12 +416,48 @@ def _signatures(adapters: Sequence[Adapter]) -> tuple[ProcessSignature, ...]:
     return tuple(found)
 
 
+def _linked(node: ProcessNode, linked: dict[int, str]) -> ProcessNode:
+    session_id = linked.get(node.pid, node.session_id)
+    if session_id == node.session_id:
+        return node
+    return replace(node, session_id=session_id)
+
+
+def _session_findings(
+    outcome: Resources, activities: Sequence[SessionActivity], redactor: Redactor
+) -> list[Finding]:
+    """Findings from the session rules, redacted. A failing rule is a finding."""
+    if outcome.session_rules is None or not activities:
+        return []
+    try:
+        found = outcome.session_rules(outcome.processes, activities)
+    except Exception:  # a rule bug must not stop the scan; no text is copied
+        return [
+            make_finding(
+                "collector.unavailable",
+                Severity.AMBER,
+                "session-rules",
+                "Session resource checks could not run",
+                "The check that matches sessions to their processes failed "
+                "unexpectedly.",
+                _FIX_ERROR,
+            )
+        ]
+    return [redactor.finding(item) for item in found]
+
+
 def _clean_report(
     redactor: Redactor, raw: AdapterReport, now: datetime, stale_hours: float
-) -> HarnessReport:
+) -> tuple[HarnessReport, tuple[Session, ...]]:
+    """The redacted report, and its sessions as the harness reported them.
+
+    The second item keeps each state from before `_with_state`, because a
+    session marked stale for its idle time still holds its processes, and the
+    session rules need to see that it is idle.
+    """
     report = redactor.report(raw)
     sessions = tuple(_with_state(item, now, stale_hours) for item in report.sessions)
-    return replace(report, sessions=_sorted_sessions(sessions))
+    return replace(report, sessions=_sorted_sessions(sessions)), report.sessions
 
 
 def build_snapshot(
@@ -394,13 +501,18 @@ def build_snapshot(
     )
 
     reports: list[HarnessReport] = []
+    reported: list[Session] = []
     failures: dict[str, str] = {}
     for adapter, job in jobs:
         status, result = job.wait(deadline)
         if status == OK and not isinstance(result, AdapterReport):
             status = BAD_DATA
         if isinstance(result, AdapterReport) and status == OK:
-            reports.append(_clean_report(redactor, result, moment, config.stale_hours))
+            clean, original = _clean_report(
+                redactor, result, moment, config.stale_hours
+            )
+            reports.append(clean)
+            reported.extend(original)
             continue
         failed = _failed_report(
             adapter, redactor, status, config.adapter_timeout_seconds
@@ -416,9 +528,14 @@ def build_snapshot(
         status, outcome = resource_job.wait(deadline)
         if status == OK and isinstance(outcome, Resources):
             system = outcome.system
-            nodes = (redactor.process(node) for node in outcome.processes)
+            activities = session_activities(reported, moment)
+            linked = link_processes(outcome.processes, activities)
+            nodes = (
+                redactor.process(_linked(node, linked)) for node in outcome.processes
+            )
             processes = tuple(sorted(nodes, key=lambda node: node.pid))
             findings.extend(redactor.finding(item) for item in outcome.findings)
+            findings.extend(_session_findings(outcome, activities, redactor))
         else:
             timed_out = status == TIMEOUT
             findings.append(

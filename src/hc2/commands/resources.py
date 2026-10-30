@@ -27,14 +27,17 @@ from hc2.collect.processes import (
     total_memory,
 )
 from hc2.collect.system import SystemReading, collect_system
-from hc2.model import SCHEMA_VERSION, Finding, ProcessNode
 from hc2.config import Config
+from hc2.model import SCHEMA_VERSION, Finding, ProcessNode
 from hc2.rules.resources import (
     DEFAULT_THRESHOLDS,
     GB,
     MB,
+    SessionActivity,
     Thresholds,
     evaluate,
+    evaluate_sessions,
+    is_under_pressure,
 )
 from hc2.scan import Collector, Resources
 
@@ -160,17 +163,27 @@ def sample(
     )
 
 
-
 def scan_collector(config: Config, *, runner: Runner = run_command) -> Collector:
     """The resource collector `hc2 scan` runs, with thresholds from the config."""
     thresholds = Thresholds.from_mapping(config.resources_table())
 
     def collect(signatures: Sequence[ProcessSignature]) -> Resources:
         report = sample(signatures, thresholds=thresholds, runner=runner)
+        pressured = is_under_pressure(report.system, thresholds)
+
+        def judge(
+            nodes: Sequence[ProcessNode], sessions: Sequence[SessionActivity]
+        ) -> tuple[Finding, ...]:
+            # Same thresholds and same pressure reading as the sample above.
+            return evaluate_sessions(
+                nodes, sessions, thresholds=thresholds, pressured=pressured
+            )
+
         return Resources(
             system=report.system.sample,
             processes=report.table.nodes,
             findings=report.findings,
+            session_rules=judge,
         )
 
     return collect

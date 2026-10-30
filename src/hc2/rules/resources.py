@@ -249,6 +249,11 @@ def _pressure(
     return worst, reasons
 
 
+def is_under_pressure(reading: SystemReading, th: Thresholds) -> bool:
+    """True when swap, the compressor, free memory or macOS report pressure."""
+    return _pressure(reading, th)[0] is not None
+
+
 def memory_pressure(reading: SystemReading, th: Thresholds) -> list[Finding]:
     """One finding when swap, the compressor, free memory or macOS say so."""
     severity, reasons = _pressure(reading, th)
@@ -641,12 +646,13 @@ def evaluate(
 
     `cpu_seconds` is cumulative CPU time per pid (from `ProcessTable`); with it
     the hot-child rule judges a process over its whole life. `sessions` may be
-    empty, in which case the session rules simply find nothing.
+    empty, in which case the session rules simply find nothing. The scan passes
+    none here and runs them later with `evaluate_sessions`, once the adapters'
+    sessions are known, so no finding is made twice.
     """
     th = thresholds
     index = ProcessIndex(nodes)
-    severity, _ = _pressure(reading, th)
-    pressured = severity is not None
+    pressured = is_under_pressure(reading, th)
     found: list[Finding] = []
     found += memory_pressure(reading, th)
     found += idle_sessions(index, sessions, th, under_pressure=pressured)
@@ -657,4 +663,23 @@ def evaluate(
     found += hot_children(nodes, th, cpu_seconds or {})
     found += renderer_bloat(nodes, th, under_pressure=pressured)
     found += heavy_lock(heavy_lock_present)
+    return tuple(sorted(found, key=lambda f: (-f.severity.rank, f.rule_id, f.id)))
+
+
+def evaluate_sessions(
+    nodes: Sequence[ProcessNode],
+    sessions: Sequence[SessionActivity],
+    *,
+    thresholds: Thresholds = DEFAULT_THRESHOLDS,
+    pressured: bool = False,
+) -> tuple[Finding, ...]:
+    """Run only the two session rules (idle and busy-but-quiet).
+
+    `pressured` is the same "under pressure" flag `evaluate` derives from the
+    system reading. The result is sorted the same way as `evaluate`'s.
+    """
+    index = ProcessIndex(nodes)
+    found: list[Finding] = []
+    found += idle_sessions(index, sessions, thresholds, under_pressure=pressured)
+    found += busy_but_quiet(index, sessions, thresholds)
     return tuple(sorted(found, key=lambda f: (-f.severity.rank, f.rule_id, f.id)))

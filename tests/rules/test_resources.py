@@ -504,5 +504,49 @@ class OutputShapeTests(unittest.TestCase):
         self.assertEqual(run(), ())
 
 
+class SessionOnlyTests(unittest.TestCase):
+    """`evaluate_sessions` runs just the two session rules."""
+
+    def nodes(self) -> list[ProcessNode]:
+        return [
+            node(10, "agent", ppid=1, role=R_.HARNESS, cpu=0.5, mb=200, harness="h1"),
+            node(11, "node", ppid=10, role=R_.OTHER, cpu=0.1, mb=100, harness="h1"),
+            node(50, "node", ppid=1, role=R_.DEV_SERVER, minutes=60, ports=(3000,)),
+        ]
+
+    def test_it_finds_the_session_problem_and_nothing_else(self) -> None:
+        found = R.evaluate_sessions(self.nodes(), [idle(7 * HOUR)])
+        self.assertEqual([f.rule_id for f in found], [R.RULE_IDLE_SESSION])
+        # The orphaned dev server is for `evaluate`, not for this function.
+        self.assertTrue(only(run(self.nodes()), R.RULE_ORPHAN))
+
+    def test_evaluate_without_sessions_finds_no_session_problem(self) -> None:
+        found = run(self.nodes())
+        self.assertEqual(only(found, R.RULE_IDLE_SESSION), [])
+        self.assertEqual(only(found, R.RULE_BUSY_QUIET), [])
+
+    def test_the_pressure_flag_lifts_info_to_amber(self) -> None:
+        calm = R.evaluate_sessions(self.nodes(), [idle(7 * HOUR)])
+        tight = R.evaluate_sessions(self.nodes(), [idle(7 * HOUR)], pressured=True)
+        self.assertIs(calm[0].severity, Severity.INFO)
+        self.assertIs(tight[0].severity, Severity.AMBER)
+
+    def test_it_matches_what_evaluate_finds_for_the_same_sessions(self) -> None:
+        sessions = [idle(7 * HOUR), session(SessionState.RUNNING_BUSY, HOUR, 10)]
+        both = {
+            f.id
+            for f in run(self.nodes(), sessions=sessions)
+            if f.rule_id in (R.RULE_IDLE_SESSION, R.RULE_BUSY_QUIET)
+        }
+        only_sessions = {f.id for f in R.evaluate_sessions(self.nodes(), sessions)}
+        self.assertEqual(both, only_sessions)
+
+    def test_is_under_pressure_follows_the_pressure_reasons(self) -> None:
+        th = R.DEFAULT_THRESHOLDS
+        self.assertFalse(R.is_under_pressure(reading(), th))
+        self.assertTrue(R.is_under_pressure(reading(level="warn"), th))
+        self.assertTrue(R.is_under_pressure(reading(swap_used=5_000), th))
+
+
 if __name__ == "__main__":
     unittest.main()

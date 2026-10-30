@@ -12,8 +12,8 @@ from hc2.commands._common import (
     print_json,
     runtime_from_args,
 )
-from hc2.commands.status import render_status
 from hc2.commands.resources import scan_collector
+from hc2.commands.status import render_status
 from hc2.scan import run_scan
 from hc2.store import Store
 from hc2.summary import status_from_store
