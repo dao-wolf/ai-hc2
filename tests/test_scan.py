@@ -220,7 +220,8 @@ class SessionTests(unittest.TestCase):
         snapshot = self.build(stale_hours=0.25)
         states = {s.id: s.state for s in snapshot.harnesses[0].sessions}
         self.assertEqual(states["sess-1"], SessionState.STALE)
-        self.assertEqual(states["sess-3"], SessionState.STALE)
+        # A session whose liveness is unknown is never called stale.
+        self.assertEqual(states["sess-3"], SessionState.UNKNOWN)
 
     def test_busy_and_ended_sessions_are_never_made_stale(self) -> None:
         with fake_home() as fake:

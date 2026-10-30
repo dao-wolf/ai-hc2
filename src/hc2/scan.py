@@ -63,10 +63,10 @@ T = TypeVar("T")
 
 SYSTEM_ACTOR = Actor(ActorType.SYSTEM, "hc2")
 
-# States in which a session is believed open, so idle time can make it stale.
-_STALE_CANDIDATES = frozenset(
-    {SessionState.RUNNING_IDLE, SessionState.WAITING, SessionState.UNKNOWN}
-)
+# States in which a session is known to be open, so idle time can make it stale.
+# UNKNOWN is left out: a harness that cannot tell whether a session is running
+# (Cowork, for one) would otherwise have every old session called stale.
+_STALE_CANDIDATES = frozenset({SessionState.RUNNING_IDLE, SessionState.WAITING})
 
 
 @dataclass(frozen=True)

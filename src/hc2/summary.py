@@ -15,6 +15,7 @@ from typing import Any
 
 from hc2.audit import canonical_json
 from hc2.model import SCHEMA_VERSION, Finding, Severity, SessionState, Snapshot
+from hc2.rules.resources import RULE_MEMORY_PRESSURE
 from hc2.store import Acknowledgement, FindingRecord, ScanRecord, Store
 from hc2.text import truncate
 
@@ -69,8 +70,10 @@ def _pressure(snapshot: Snapshot) -> dict[str, Any] | None:
     swap = None
     if sample.swap_used_bytes is not None:
         swap = round(sample.swap_used_bytes / 1024**3, 2)
+    pressure = [f for f in snapshot.findings if f.rule_id == RULE_MEMORY_PRESSURE]
+    level = max((f.severity for f in pressure), key=lambda s: s.rank, default=None)
     return {
-        "level": None,
+        "level": level.value if level is not None else "green",
         "load1": sample.load_1m,
         "mem_used_pct": used,
         "swap_gb": swap,
