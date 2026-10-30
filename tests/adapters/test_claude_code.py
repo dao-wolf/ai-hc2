@@ -182,6 +182,59 @@ class LivenessTests(unittest.TestCase):
         self.assertTrue(any("running" in p for p in report.problems))
 
 
+class ProcessLinkTests(unittest.TestCase):
+    def test_a_live_session_carries_its_pid(self) -> None:
+        with fake_home() as home:
+            sessions = by_id(scan_all(home)["cli"])
+        self.assertEqual(sessions["cli-0002"].pid, 4001)
+        self.assertEqual(sessions["live-only-0001"].pid, 4008)
+        sources = {s.field: s for s in sessions["cli-0002"].field_sources}
+        self.assertEqual(sources["pid"].reliability, Reliability.HIGH)
+        self.assertNotIn("state_since", sources)  # the fixture has no status time
+        self.assertIsNone(sessions["cli-0002"].state_since)
+
+    def test_the_status_time_becomes_state_since_with_a_source(self) -> None:
+        with fake_home() as home:
+            registry = home / ".claude" / "sessions" / "4001.json"
+            text = registry.read_text(encoding="utf-8")
+            registry.write_text(
+                text.replace("}", ',"statusUpdatedAt":1790000050000}'),
+                encoding="utf-8",
+            )
+            report = scan_all(home)["cli"]
+        session = by_id(report)["cli-0002"]
+        self.assertEqual(session.state_since, "2026-09-21T14:14:10Z")
+        sources = {s.field: s for s in session.field_sources}
+        self.assertEqual(
+            sources["state_since"].source, "sessions/*.json statusUpdatedAt"
+        )
+        self.assertIn("statusUpdatedAt", " ".join(report.fields_read))
+
+    def test_a_bad_status_time_is_dropped(self) -> None:
+        with fake_home() as home:
+            registry = home / ".claude" / "sessions" / "4001.json"
+            text = registry.read_text(encoding="utf-8")
+            registry.write_text(
+                text.replace("}", ',"statusUpdatedAt":"soon"}'), encoding="utf-8"
+            )
+            session = by_id(scan_all(home)["cli"])["cli-0002"]
+        self.assertIsNone(session.state_since)
+        self.assertEqual(session.pid, 4001)
+
+    def test_sessions_that_are_not_running_have_no_pid(self) -> None:
+        with fake_home() as home:
+            sessions = by_id(scan_all(home, probe=fake_probe({}))["cli"])
+        for session in sessions.values():
+            self.assertIsNone(session.pid)
+            self.assertIsNone(session.state_since)
+
+    def test_a_dead_pid_is_not_reported(self) -> None:
+        with fake_home() as home:
+            sessions = by_id(scan_all(home)["cli"])
+        # Registry file 4003 names a dead process, so the session is ended.
+        self.assertIsNone(sessions["cli-0003"].pid)
+
+
 class ConfidentialTests(unittest.TestCase):
     def test_sessions_in_a_confidential_folder_are_flagged(self) -> None:
         with fake_home() as home:

@@ -26,7 +26,7 @@ Used by the menu bar. The target size is under 8 KB.
 | `top` | Up to 10 findings. Each is `{id, sev, title, fix, harness, ack?, web_path}`. Titles and fixes are 200 characters at most. |
 | `changes` | `{since, fixed_count, new_count, fixed[≤4], new[≤4]}` |
 | `approvals` | `{pending_count, oldest_at, top[≤3]: {id, title, action_kind, risk}}` |
-| `harnesses` | `[{id, name, state, sessions_running, sessions_stale}]` |
+| `harnesses` | `[{id, name, state, sessions_running, sessions_stale, memory_mb, cpu_percent}]`. `memory_mb` and `cpu_percent` are totals over the process trees of that harness's running sessions (including ones marked stale, which are still open), and are `null` when the scan collected no process data. Added within schema 2: clients must ignore fields they do not know. |
 | `pressure` | `{level, mem_used_pct, swap_gb, load1}` |
 | `content_hash` | A hash of the content with all times left out. Clients use it to tell whether anything really changed. |
 

@@ -367,6 +367,23 @@ class SerialisationTests(unittest.TestCase):
         self.assertEqual(data["origin"], "unknown")
         self.assertIsNone(data["title"])
         self.assertEqual(data["field_sources"], [])
+        self.assertIsNone(data["pid"])
+        self.assertIsNone(data["state_since"])
+
+    def test_pid_and_state_since_round_trip(self) -> None:
+        session = dataclasses.replace(
+            make_session(), pid=4242, state_since="2026-10-30T09:10:00Z"
+        )
+        data = session.to_dict()
+        self.assertEqual(data["pid"], 4242)
+        self.assertEqual(Session.from_dict(json.loads(session.to_json())), session)
+
+    def test_an_older_session_record_without_the_new_keys_still_loads(self) -> None:
+        data = make_session().to_dict()
+        del data["pid"], data["state_since"]
+        rebuilt = Session.from_dict(data)
+        self.assertIsNone(rebuilt.pid)
+        self.assertIsNone(rebuilt.state_since)
 
     def test_whole_numbers_come_back_as_floats_where_declared(self) -> None:
         rebuilt = SystemSample.from_dict(json.loads(make_sample().to_json()))

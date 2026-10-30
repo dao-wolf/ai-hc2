@@ -123,8 +123,30 @@ class DesktopSessionTests(unittest.TestCase):
         self.assertEqual(
             sources,
             {"id", "title", "folder", "model", "created", "last_activity"}
-            | {"origin", "state"},
+            | {"origin", "state", "pid"},
         )
+
+    def test_a_live_session_carries_its_pid_and_status_time(self) -> None:
+        with fake_home() as home:
+            registry = home / ".claude" / "sessions" / "4002.json"
+            text = registry.read_text(encoding="utf-8")
+            registry.write_text(
+                text.replace("}", ',"statusUpdatedAt":1790000050000}'),
+                encoding="utf-8",
+            )
+            sessions = by_id(scan_all(home)["desktop"])
+        live = sessions["local_0001"]
+        self.assertEqual(live.pid, 4002)
+        self.assertEqual(live.state_since, utc(1790000050000))
+        fields = {s.field for s in live.field_sources}
+        self.assertTrue({"pid", "state_since"} <= fields)
+
+    def test_an_ended_session_has_no_pid(self) -> None:
+        with fake_home() as home:
+            sessions = by_id(scan_all(home, probe=fake_probe({}))["desktop"])
+        for session in sessions.values():
+            self.assertIsNone(session.pid)
+            self.assertIsNone(session.state_since)
 
     def test_the_other_state_is_unknown_when_processes_cannot_be_checked(self) -> None:
         with fake_home() as home:
