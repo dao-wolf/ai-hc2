@@ -1,0 +1,21 @@
++-o AGXDeviceUserClient  <class AGXDeviceUserClient, id 0x100000a1b, registered, matched, active, busy 0 (0 ms), retain 6>
+    | {
+    |   "IOUserClientCreator" = "pid 101, Example Agent Helper (GPU)"
+    |   "AppUsage" = ({"API"="Metal","accumulatedGPUTime"=2500000000})
+    | }
+    | 
++-o AGXDeviceUserClient  <class AGXDeviceUserClient, id 0x100000a1c, registered, matched, active, busy 0 (0 ms), retain 6>
+    | {
+    |   "IOUserClientCreator" = "pid 101, Example Agent Helper (GPU)"
+    |   "AppUsage" = ({"API"="Metal","accumulatedGPUTime"=1500000000},{"API"="Metal","accumulatedGPUTime"=500000000})
+    | }
+    | 
++-o AGXDeviceUserClient  <class AGXDeviceUserClient, id 0x100000a1d, registered, matched, active, busy 0 (0 ms), retain 6>
+    | {
+    |   "IOUserClientCreator" = "pid 700, Everyday Browser"
+    |   "AppUsage" = ({"API"="Metal","accumulatedGPUTime"=42000000})
+    | }
++-o AGXDeviceUserClient  <class AGXDeviceUserClient, id 0x100000a1e, registered, matched, active, busy 0 (0 ms), retain 6>
+    | {
+    |   "AppUsage" = ({"API"="Metal","accumulatedGPUTime"=999})
+    | }
