@@ -155,6 +155,7 @@ From the discovery spike on 30 Oct 2026. "Live state" means HC2 can tell whether
   - Each adapter lists the exact fields it reads, and a test proves message text never reaches its output.
 - **P-2 Confidential folders.**
   - Always shown as "Confidential A", "Confidential B" and so on, in every surface. There is no setting that reveals them.
+  - Sessions anywhere whose title or folder contains a configured confidential term (whole words, ignoring case) are masked the same way, under one shared label, so the label never reveals which term matched.
   - Their titles and paths never appear in any surface, log, export or LLM payload.
 - **P-3 Redact at the core.** Redaction happens in the core, before data reaches a surface, a log or an LLM.
 - **P-4 No personal data in the repo.** A privacy gate in pre-commit and CI checks every change against a personal deny-list that is kept outside the repo.
