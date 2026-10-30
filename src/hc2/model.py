@@ -168,6 +168,14 @@ class ActionKind(StrEnum):
     RESCAN = "rescan"
 
 
+class Risk(StrEnum):
+    """How much harm a proposed action could do if it went wrong (FR-10)."""
+
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+
 class ProposalStatus(StrEnum):
     """Where a proposal is in its life (FR-10)."""
 
@@ -342,11 +350,13 @@ class Harness(Model):
 
     `id` is a short slug the adapter owns, such as `claude-code-cli`. It is
     never a path. `installs` is empty when the harness is not installed.
+    `installed` is `None` when HC2 could not tell, for example after an adapter
+    failed or timed out (R-1).
     """
 
     id: str
     name: str
-    installed: bool
+    installed: bool | None
     installs: tuple[Install, ...] = ()
     config_location: str | None = None
     docs_url: str | None = None
@@ -478,6 +488,11 @@ class Proposal(Model):
     same proposer suggesting the same thing twice gives the same id. `preview`
     says exactly what will happen, in plain English. Only a person can move
     `status` to approved or rejected (A-2); `decided_by` records who.
+
+    `preview_hash` is the SHA-256 of the canonical action, parameters and
+    preview, which a passkey assertion signs (A-4). `expires_at` is when the
+    proposal lapses. `risk` and `reversible` help the person decide. All four
+    are `None` until the proposer or the action catalogue sets them.
     """
 
     id: str
@@ -492,6 +507,10 @@ class Proposal(Model):
     decided_by: Actor | None = None
     decided_at: str | None = None
     trace_id: str | None = None
+    preview_hash: str | None = None
+    expires_at: str | None = None
+    risk: Risk | None = None
+    reversible: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -512,6 +531,44 @@ class Action(Model):
     executed_at: str | None = None
     verified: bool | None = None
     trace_id: str | None = None
+
+
+# --------------------------------------------------------------------------
+# Snapshot (FR-1, FR-2, FR-9)
+# --------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class HarnessReport(Model):
+    """What one adapter found in one scan, after redaction (P-3).
+
+    It has the same shape as `AdapterReport`, which lives in `hc2.adapters`.
+    A `Snapshot` holds these, never the raw adapter reports.
+    """
+
+    harness: Harness
+    sessions: tuple[Session, ...] = ()
+    problems: tuple[str, ...] = ()
+    fields_read: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class Snapshot(Model):
+    """Everything one scan found, redacted once and ready for every surface.
+
+    `scan_id` is `stable_id("scan", content_hash)`: it comes from the content,
+    never the clock, so identical scans share an id (D-1). Harness reports are
+    sorted by harness id and findings by severity then id. `system` and
+    `processes` stay empty until a resource collector fills them (FR-4).
+    """
+
+    schema: int
+    generated: str
+    scan_id: str
+    harnesses: tuple[HarnessReport, ...] = ()
+    findings: tuple[Finding, ...] = ()
+    system: SystemSample | None = None
+    processes: tuple[ProcessNode, ...] = ()
 
 
 # --------------------------------------------------------------------------
