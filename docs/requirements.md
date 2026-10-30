@@ -128,7 +128,13 @@ From the discovery spike on 30 Oct 2026. "Live state" means HC2 can tell whether
 
 - **A-3 MCP.** MCP over stdio runs as the local user. MCP over HTTP (later) needs the token and a client name.
 - **A-4 Proof of presence.**
-  - Every approver action needs a passkey assertion (WebAuthn with user verification, such as Touch ID). The assertion signs that exact decision: the proposal ids, a hash of each preview, a nonce and an expiry.
+  - Every approver action needs a passkey assertion (WebAuthn with user verification). The assertion signs that exact decision: the proposal ids, a hash of each preview, a nonce and an expiry.
+  - Any passkey with user verification works:
+    - Touch ID;
+    - the Mac login password, on Macs without Touch ID;
+    - a phone over a QR code (Face ID or fingerprint);
+    - a hardware security key with a PIN.
+  - For someone with none of these, an opt-in "unprotected approvals" mode allows a plain click. It shows a permanent red finding on every surface while it's on, because any agent could then approve.
   - One assertion can cover a batch of decisions.
   - Challenges can be used once only and expire within minutes.
   - A changed proposal, a replayed approval or an expired one is refused.
