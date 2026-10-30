@@ -16,7 +16,8 @@ config file, then the built-in default.
   `HC2_STALE_HOURS`.
 * Retention in days: `[audit] retention_days`, or `HC2_RETENTION_DAYS`.
 * Adapter switches: `[adapters] <adapter_id> = true`, then
-  `HC2_ENABLE_ADAPTERS` and `HC2_DISABLE_ADAPTERS`.
+  `HC2_ENABLE_ADAPTERS` and `HC2_DISABLE_ADAPTERS`. The id `resources` switches
+  the process and system collector, which `hc2 scan` runs by default.
 * Resource rule thresholds: the `[rules.resources]` table, passed through
   unchanged as `Config.resources_table()`. The resources lane owns the key
   names and checks them (`Thresholds.from_mapping`); this module does not.

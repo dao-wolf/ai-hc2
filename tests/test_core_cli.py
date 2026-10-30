@@ -25,6 +25,7 @@ from core_helpers import (
 )
 from hc2 import cli
 from hc2.commands import command_modules
+from hc2.scan import Resources
 
 SECRET_TERM = "sentinel codename"
 TITLE_WITH_TERM = "Plan for the Sentinel Codename launch"
@@ -61,10 +62,32 @@ def configured(fake: FakeHome) -> mock._patch_dict:  # type: ignore[type-arg]
     )
 
 
+
+def _no_resources(_config: object) -> object:
+    """A collector that returns nothing, so unit tests never sample this machine."""
+    return lambda _signatures: Resources()
+
+
+_patches = [
+    mock.patch("hc2.commands._common.scan_collector", _no_resources),
+    mock.patch("hc2.commands.scan.scan_collector", _no_resources),
+]
+
+
+def setUpModule() -> None:
+    for patch in _patches:
+        patch.start()
+
+
+def tearDownModule() -> None:
+    for patch in _patches:
+        patch.stop()
+
+
 class CommandRegistrationTests(unittest.TestCase):
     def test_every_command_module_registers_with_a_handler(self) -> None:
         names = [m.__name__.rsplit(".", 1)[-1] for m in command_modules()]
-        self.assertEqual(names, ["doctor", "scan", "sessions", "status"])
+        self.assertEqual(names, ["doctor", "resources", "scan", "sessions", "status"])
         for name in names:
             with self.subTest(command=name):
                 args = cli.build_parser().parse_args([name])
@@ -74,7 +97,8 @@ class CommandRegistrationTests(unittest.TestCase):
         code, out, _ = run("--json")
         self.assertEqual(code, 2)
         self.assertEqual(
-            json.loads(out)["commands"], ["doctor", "scan", "sessions", "status"]
+            json.loads(out)["commands"],
+            ["doctor", "resources", "scan", "sessions", "status"],
         )
 
 

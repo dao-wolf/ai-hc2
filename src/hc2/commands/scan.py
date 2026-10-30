@@ -13,6 +13,7 @@ from hc2.commands._common import (
     runtime_from_args,
 )
 from hc2.commands.status import render_status
+from hc2.commands.resources import scan_collector
 from hc2.scan import run_scan
 from hc2.store import Store
 from hc2.summary import status_from_store
@@ -21,7 +22,16 @@ from hc2.summary import status_from_store
 def run(args: argparse.Namespace) -> int:
     """Run a scan, store it and print the result."""
     runtime = runtime_from_args(args)
-    result = run_scan(runtime.config, home=runtime.home, state=runtime.state)
+    result = run_scan(
+        runtime.config,
+        home=runtime.home,
+        state=runtime.state,
+        collector=(
+            scan_collector(runtime.config)
+            if runtime.config.adapter_enabled("resources")
+            else None
+        ),
+    )
     with Store.create(runtime.state) as store:
         found = status_from_store(store, datetime.now(UTC))
     if found is None:  # pragma: no cover - the scan was just stored

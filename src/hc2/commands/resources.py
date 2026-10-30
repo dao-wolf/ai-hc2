@@ -28,7 +28,15 @@ from hc2.collect.processes import (
 )
 from hc2.collect.system import SystemReading, collect_system
 from hc2.model import SCHEMA_VERSION, Finding, ProcessNode
-from hc2.rules.resources import GB, MB, evaluate
+from hc2.config import Config
+from hc2.rules.resources import (
+    DEFAULT_THRESHOLDS,
+    GB,
+    MB,
+    Thresholds,
+    evaluate,
+)
+from hc2.scan import Collector, Resources
 
 TOP_TREES = 5
 SEVERITY_LABELS = {"red": "RED", "amber": "AMBER", "info": "INFO", "green": "OK"}
@@ -127,6 +135,7 @@ def sample(
     signatures: Sequence[ProcessSignature] = (),
     *,
     lock_file: str | None = None,
+    thresholds: Thresholds = DEFAULT_THRESHOLDS,
     runner: Runner = run_command,
 ) -> ResourceReport:
     """Take one reading and run the rules over it."""
@@ -138,6 +147,7 @@ def sample(
     findings = evaluate(
         system,
         table.nodes,
+        thresholds=thresholds,
         cpu_seconds=table.cpu_seconds,
         heavy_lock_present=lock_present(lock_file),
     )
@@ -148,6 +158,22 @@ def sample(
         findings=findings,
         elapsed_seconds=time.monotonic() - started,
     )
+
+
+
+def scan_collector(config: Config, *, runner: Runner = run_command) -> Collector:
+    """The resource collector `hc2 scan` runs, with thresholds from the config."""
+    thresholds = Thresholds.from_mapping(config.resources_table())
+
+    def collect(signatures: Sequence[ProcessSignature]) -> Resources:
+        report = sample(signatures, thresholds=thresholds, runner=runner)
+        return Resources(
+            system=report.system.sample,
+            processes=report.table.nodes,
+            findings=report.findings,
+        )
+
+    return collect
 
 
 # --------------------------------------------------------------------------

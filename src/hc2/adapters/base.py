@@ -65,7 +65,11 @@ class AdapterReport(Model):
 
 @runtime_checkable
 class Adapter(Protocol):
-    """One harness. Read-only: an adapter never writes, runs a harness or calls the network unless `ctx.network`."""
+    """One harness, read-only.
+
+    An adapter never writes, never runs a harness, and calls the network only
+    when `ctx.network` is true.
+    """
 
     id: str
     name: str

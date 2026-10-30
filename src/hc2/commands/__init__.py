@@ -14,5 +14,9 @@ from types import ModuleType
 
 def command_modules() -> list[ModuleType]:
     """Every command module in this package, sorted by name for a stable `--help`."""
-    names = sorted(info.name for info in pkgutil.iter_modules(__path__) if not info.name.startswith("_"))
+    names = sorted(
+        info.name
+        for info in pkgutil.iter_modules(__path__)
+        if not info.name.startswith("_")
+    )
     return [importlib.import_module(f"{__name__}.{name}") for name in names]

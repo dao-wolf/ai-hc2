@@ -15,6 +15,7 @@ from typing import Any
 from hc2.config import Config, Overrides, load_config
 from hc2.model import SCHEMA_VERSION, Snapshot
 from hc2.paths import state_dir
+from hc2.commands.resources import scan_collector
 from hc2.scan import run_scan
 from hc2.store import Store
 from hc2.summary import status_from_store
@@ -129,7 +130,16 @@ def latest_scan(
                 return found
         if not getattr(args, "json", False):
             print(NO_SCAN_NOTICE, file=sys.stderr)
-    run_scan(runtime.config, home=runtime.home, state=runtime.state)
+    run_scan(
+        runtime.config,
+        home=runtime.home,
+        state=runtime.state,
+        collector=(
+            scan_collector(runtime.config)
+            if runtime.config.adapter_enabled("resources")
+            else None
+        ),
+    )
     with Store.create(runtime.state) as store:
         found = status_from_store(store, datetime.now(UTC))
     if found is None:  # pragma: no cover - a scan was just stored

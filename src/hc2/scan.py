@@ -75,6 +75,7 @@ class Resources:
 
     system: SystemSample | None = None
     processes: tuple[ProcessNode, ...] = ()
+    findings: tuple[Finding, ...] = ()
 
 
 Collector = Callable[[Sequence[ProcessSignature]], Resources]
@@ -417,6 +418,7 @@ def build_snapshot(
             system = outcome.system
             nodes = (redactor.process(node) for node in outcome.processes)
             processes = tuple(sorted(nodes, key=lambda node: node.pid))
+            findings.extend(redactor.finding(item) for item in outcome.findings)
         else:
             timed_out = status == TIMEOUT
             findings.append(
