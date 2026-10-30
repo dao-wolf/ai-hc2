@@ -205,6 +205,26 @@ def scan_tree(
     return sorted(set(hits)), scanned, skipped
 
 
+def scan_identity(root: Path, terms: Sequence[Term]) -> list[Hit]:
+    """Check the author and committer name and email git will put on a commit.
+
+    Commit metadata becomes public with the history and can't be taken back
+    after a push, so a real name in `user.name` counts as a leak too.
+    """
+    hits: list[Hit] = []
+    roles = (("author", "GIT_AUTHOR_IDENT"), ("committer", "GIT_COMMITTER_IDENT"))
+    for role, variable in roles:
+        command = ["git", "-C", str(root), "var", variable]
+        try:
+            done = subprocess.run(command, capture_output=True, check=True)
+        except (OSError, subprocess.CalledProcessError):
+            continue
+        # The ident ends with a timestamp and offset; keep only "Name <email>".
+        ident = done.stdout.decode("utf-8", "replace").strip().rsplit(">", 1)[0] + ">"
+        hits.extend(scan_text(f"<git {role}>", ident, terms))
+    return sorted(set(hits))
+
+
 def resolve_denylist(option: str | None) -> Path:
     """Pick the deny-list path: the option, then the environment, then the default."""
     chosen = option or os.environ.get(ENV_DENYLIST, "").strip() or DEFAULT_DENYLIST
@@ -258,6 +278,7 @@ def main(argv: Iterable[str] | None = None) -> int:
                 file=sys.stderr,
             )
     hits, scanned, skipped = scan_tree(args.root, terms)
+    hits = sorted(set(hits) | set(scan_identity(args.root, terms)))
     for hit in hits:
         print(hit)
     print(

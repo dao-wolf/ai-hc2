@@ -218,6 +218,39 @@ class TreeScanTests(unittest.TestCase):
                 self.assertEqual(gate.list_files(root), ["real.txt"])
 
 
+
+class IdentityTests(unittest.TestCase):
+    """The name and email git will put on a commit are checked too."""
+
+    def scan(self, author: str, email: str) -> list[tuple[str, int, str]]:
+        terms = gate.parse_terms(DENYLIST)
+        env = {
+            "GIT_AUTHOR_NAME": author,
+            "GIT_AUTHOR_EMAIL": email,
+            "GIT_COMMITTER_NAME": "example-handle",
+            "GIT_COMMITTER_EMAIL": "1+example-handle" + AT + "users.noreply.github.com",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            subprocess.run(["git", "init", "-q", tmp], check=True)
+            with mock.patch.dict(os.environ, env):
+                hits = gate.scan_identity(Path(tmp), terms)
+        return [(h.path, h.line, h.label) for h in hits]
+
+    def test_a_real_name_in_the_author_is_a_hit(self) -> None:
+        noreply = "1+q" + AT + "users.noreply.github.com"
+        self.assertEqual(
+            self.scan("Quentin Example", noreply), [("<git author>", 1, "term#6")]
+        )
+
+    def test_a_personal_email_in_the_author_is_a_hit(self) -> None:
+        found = self.scan("example-handle", "quentin" + AT + "mail.example.org")
+        self.assertEqual(found, [("<git author>", 1, "email")])
+
+    def test_a_handle_and_noreply_email_are_clean(self) -> None:
+        noreply = "1+example-handle" + AT + "users.noreply.github.com"
+        self.assertEqual(self.scan("example-handle", noreply), [])
+
+
 class CommandLineTests(unittest.TestCase):
     def run_gate(
         self, *argv: str, env: dict[str, str] | None = None
