@@ -25,6 +25,8 @@ from hc2.adapters.claude_common import (
     display_path,
     iso_from_ms,
     list_dir,
+    live_link,
+    live_sources,
     make_install,
     origin_from_entrypoint,
     probe_processes,
@@ -53,8 +55,8 @@ FIELDS_READ = (
     "bin/claude symlink: target folder name only",
     "projects/*/*.jsonl, head and tail only: type, timestamp, cwd, entrypoint, "
     "message.model (assistant records), customTitle, agentName, aiTitle",
-    "sessions/*.json: sessionId, pid, procStart, status, name, cwd, entrypoint, "
-    "startedAt, updatedAt",
+    "sessions/*.json: sessionId, pid, procStart, status, statusUpdatedAt, name, "
+    "cwd, entrypoint, startedAt, updatedAt",
     "claude-code-sessions/*/*/local_*.json: sessionId, cliSessionId, "
     "priorCliSessionIds (to avoid listing desktop sessions twice)",
     "local-agent-mode-sessions/*/*/local_*.json: sessionId, cliSessionId, "
@@ -261,6 +263,7 @@ class ClaudeCodeAdapter:
             if meta.model
             else None,
         ]
+        refs += live_sources(entry)
         if title and not confidential:
             if meta.title and meta.title_kind:
                 refs.append(
@@ -268,6 +271,7 @@ class ClaudeCodeAdapter:
                 )
             else:
                 refs.append(source("title", "sessions/*.json name", Reliability.MEDIUM))
+        pid, state_since = live_link(entry)
         return Session(
             id=session_id,
             harness_id=HARNESS_ID,
@@ -280,6 +284,8 @@ class ClaudeCodeAdapter:
             origin=origin_from_entrypoint(origin_value),
             confidential=confidential,
             field_sources=sorted_sources(refs),
+            pid=pid,
+            state_since=state_since,
         )
 
 
@@ -334,7 +340,9 @@ def _registry_session(
         source("title", "sessions/*.json name", Reliability.MEDIUM)
         if entry.name and not confidential
         else None,
+        *live_sources(entry),
     ]
+    pid, state_since = live_link(entry)
     return Session(
         id=entry.session_id,
         harness_id=HARNESS_ID,
@@ -346,6 +354,8 @@ def _registry_session(
         origin=origin_from_entrypoint(entry.entrypoint),
         confidential=confidential,
         field_sources=sorted_sources(refs),
+        pid=pid,
+        state_since=state_since,
     )
 
 

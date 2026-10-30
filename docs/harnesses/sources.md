@@ -44,7 +44,7 @@ HC2 reads metadata only (P-1). The "Fields HC2 reads" column lists the only keys
 | Settings | `~/.claude/settings.json` |
 | Sessions | `~/.claude/projects/<folder-encoded-as-dashes>/<sessionId>.jsonl`, one file per session. |
 | Live registry | `~/.claude/sessions/<pid>.json`, written by every running `claude`. A file only counts if its `pid` is alive and the process name is `claude`, which also guards against recycled process ids. |
-| Fields HC2 reads | From the head of the transcript: first timestamp, `cwd`, `entrypoint`, `version`. From title lines: `customTitle`, `agentName` or `aiTitle`, in that order. From the tail: last timestamp and the model name. From the registry: `sessionId`, `pid`, `status`, `name`, `cwd`, `startedAt`, `updatedAt`, `entrypoint`. |
+| Fields HC2 reads | From the head of the transcript: first timestamp, `cwd`, `entrypoint`, `version`. From title lines: `customTitle`, `agentName` or `aiTitle`, in that order. From the tail: last timestamp and the model name. From the registry: `sessionId`, `pid`, `status`, `statusUpdatedAt`, `name`, `cwd`, `startedAt`, `updatedAt`, `entrypoint`. |
 | How it reads | Only a bounded slice at the start and end of each transcript, never the whole file. |
 | Overlap | Sessions started by the desktop Code tab share this store. They have `entrypoint` set to the desktop app, or a matching `cliSessionId` in the desktop index. List them once, under the desktop harness. |
 | Live state | Yes. The registry's `status` field, checked against the process table. |

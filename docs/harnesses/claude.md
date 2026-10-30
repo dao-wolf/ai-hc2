@@ -82,6 +82,8 @@ The registry is `~/.claude/sessions/<pid>.json`. A file counts only if all of th
 | No live registry entry | ended |
 | The process table could not be read | unknown (never ended), with a problem |
 
+For a session found running through the registry, HC2 also records `pid` (the registry's `pid`, confirmed alive by the checks above) and `state_since` (the registry's `statusUpdatedAt`, when the status last changed). Both are `null` when the session is not running or the registry has no usable value. HC2 uses them to link a session to its process tree and to work out how long it has been in its current state.
+
 A registry entry with no transcript yet is listed from the registry alone: `sessionId`, `name`, `cwd`, `entrypoint`, `startedAt` and `updatedAt`.
 
 ### Sessions left to the desktop adapter

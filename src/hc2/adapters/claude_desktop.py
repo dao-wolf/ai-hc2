@@ -30,6 +30,8 @@ from hc2.adapters.claude_common import (
     display_path,
     iso_from_ms,
     list_dir,
+    live_link,
+    live_sources,
     make_install,
     probe_processes,
     read_index_records,
@@ -60,7 +62,7 @@ FIELDS_READ = (
     "claude-code-sessions/*/*/local_*.json: sessionId, cliSessionId, title, cwd, "
     "originCwd, model, createdAt, lastActivityAt, isArchived",
     "sessions/*.json (shared registry): sessionId, pid, procStart, status, "
-    "startedAt, updatedAt",
+    "statusUpdatedAt, startedAt, updatedAt",
     "process table: pid, start time, executable name",
 )
 
@@ -213,7 +215,9 @@ def _session(
         source("last_activity", "index lastActivityAt", Reliability.HIGH)
         if last
         else None,
+        *live_sources(entry),
     ]
+    pid, state_since = live_link(entry)
     return Session(
         id=session_id,
         harness_id=HARNESS_ID,
@@ -226,6 +230,8 @@ def _session(
         origin=Origin.DESKTOP,
         confidential=confidential,
         field_sources=sorted_sources(refs),
+        pid=pid,
+        state_since=state_since,
     )
 
 

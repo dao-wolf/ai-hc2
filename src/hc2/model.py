@@ -385,6 +385,10 @@ class Session(Model):
     `id` is the harness's own session id, never a file path. `title` and
     `folder` arrive already masked when `confidential` is true: the redactor
     replaces them with labels such as "Confidential A" (P-2).
+
+    `pid` is the OS process the session runs in, where the harness says so and
+    the process is confirmed alive; otherwise `None`. `state_since` is when the
+    session entered its current `state` (ISO UTC), if the harness reports it.
     """
 
     id: str
@@ -398,6 +402,8 @@ class Session(Model):
     origin: Origin = Origin.UNKNOWN
     confidential: bool = False
     field_sources: tuple[FieldSource, ...] = ()
+    pid: int | None = None
+    state_since: str | None = None
 
 
 # --------------------------------------------------------------------------

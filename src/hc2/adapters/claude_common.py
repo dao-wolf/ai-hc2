@@ -605,7 +605,11 @@ def probe_processes(pids: Sequence[int]) -> dict[int, ProcessInfo] | None:
 
 @dataclass(frozen=True)
 class LiveSession:
-    """One running `claude` that is listed in the registry."""
+    """One running `claude` that is listed in the registry.
+
+    `pid` is the process id from the registry file, and `status_ms` is when
+    `status` last changed (the registry's `statusUpdatedAt`).
+    """
 
     session_id: str
     status: str | None
@@ -614,6 +618,8 @@ class LiveSession:
     entrypoint: str | None
     started_ms: int | None
     updated_ms: int | None
+    pid: int | None = None
+    status_ms: int | None = None
 
 
 @dataclass(frozen=True)
@@ -631,6 +637,26 @@ def state_from_status(status: str | None) -> SessionState:
         "idle": SessionState.RUNNING_IDLE,
         "waiting": SessionState.WAITING,
     }.get(status or "", SessionState.UNKNOWN)
+
+
+def live_link(entry: LiveSession | None) -> tuple[int | None, str | None]:
+    """The process id and the time the status last changed, for a live session."""
+    if entry is None:
+        return None, None
+    return entry.pid, iso_from_ms(entry.status_ms)
+
+
+def live_sources(entry: LiveSession | None) -> list[FieldSource | None]:
+    """Where `pid` and `state_since` came from, for fields that are present."""
+    pid, since = live_link(entry)
+    return [
+        source("pid", "sessions/*.json pid, process confirmed alive", Reliability.HIGH)
+        if pid is not None
+        else None,
+        source("state_since", "sessions/*.json statusUpdatedAt", Reliability.MEDIUM)
+        if since is not None
+        else None,
+    ]
 
 
 def read_live_sessions(
@@ -680,6 +706,8 @@ def read_live_sessions(
                     entrypoint=as_str(value.get("entrypoint")),
                     started_ms=as_int(value.get("startedAt")),
                     updated_ms=as_int(value.get("updatedAt")),
+                    pid=pid,
+                    status_ms=as_int(value.get("statusUpdatedAt")),
                 ),
             )
         )
