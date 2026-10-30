@@ -4,9 +4,23 @@
 # and change what you need. Every value below is made up.
 #
 # Status: pre-alpha. This file lists the options planned in docs/requirements.md
-# (FR-3, FR-5, FR-16, F-3, Op-2). The code does not read it yet, and names may
-# still change. Precedence once it does (C-1): a command-line flag beats an
-# environment variable, which beats this file, which beats the defaults.
+# (FR-3, FR-5, FR-16, F-3, Op-2). Names may still change.
+#
+# Precedence (C-1): a command-line flag beats an environment variable, which
+# beats this file, which beats the defaults.
+#
+# Read today: privacy.confidential_folders, privacy.confidential_terms,
+# privacy.redact_all_titles,
+# scan.adapter_timeout_seconds, rules.stale_session.idle_hours,
+# audit.retention_days and the [adapters] switches. Every other setting is
+# planned: HC2 does not read it yet, but a change to any of them still raises a
+# "config changed" finding (S-7).
+#
+# Environment variables for the settings above: HC2_CONFIDENTIAL_FOLDERS
+# (separated like PATH), HC2_CONFIDENTIAL_TERMS (separated by commas),
+# HC2_ADAPTER_TIMEOUT_SECONDS, HC2_STALE_HOURS,
+# HC2_RETENTION_DAYS, HC2_ENABLE_ADAPTERS and HC2_DISABLE_ADAPTERS (comma
+# separated adapter ids).
 #
 # The values shown are the intended defaults unless a comment says otherwise.
 
@@ -26,7 +40,18 @@ confidential_folders = [
   "/home/alice/legal/example-matter",
 ]
 
-# Mask every session title, not only confidential ones.
+# Words or phrases that mark a session as confidential wherever it lives. A
+# session whose title or folder contains one is shown as "Confidential (by
+# title)", with no title or folder, and the term itself never appears in any
+# output. Matching ignores case and needs the whole word: "tarn" does not match
+# "starnet".
+confidential_terms = [
+  "example-codename",
+  "example merger",
+]
+
+# Mask every session title, not only confidential ones. Titles then show as
+# "Title hidden".
 redact_all_titles = false
 
 # ---------------------------------------------------------------------------
@@ -37,14 +62,16 @@ redact_all_titles = false
 interval_minutes = 15
 
 # Give each adapter this long, in seconds, before it is reported as unknown.
-adapter_timeout_seconds = 5
+adapter_timeout_seconds = 10
 
 # While this file exists, HC2 does not start heavy work (F-3). Point it at the
 # lock your own heavy jobs create. Leave it empty to turn the check off.
 heavy_work_lock_file = "/home/alice/.cache/example-heavy-jobs.lock"
 
 # ---------------------------------------------------------------------------
-# Adapters: one switch per harness, plus options.
+# Adapters: one switch per harness, plus options. The key is the adapter id
+# with underscores for hyphens: claude_code_cli is the adapter claude-code-cli.
+# An adapter that is not listed is on.
 # ---------------------------------------------------------------------------
 [adapters]
 claude_code_cli = true
@@ -69,40 +96,37 @@ agent_dir = ""
 # ---------------------------------------------------------------------------
 [rules.stale_session]
 enabled = true
-# A session idle for longer than this is stale (FR-3).
-idle_minutes = 120
+# A session idle for longer than this many hours is stale (FR-3).
+idle_hours = 2
 
-[rules.memory_pressure]
+[rules.resources]
+# Thresholds for the resource rules (FR-5). The names and values below are the
+# built-in defaults, from the resource spike; a key you leave out keeps its
+# default, and unknown or non-numeric keys are ignored. Memory sizes are in
+# megabytes, CPU in percent of one core, times as named.
 enabled = true
-# Raise an amber finding at this share of memory in use, and red at the second.
-amber_percent = 80
-red_percent = 92
-
-[rules.idle_session_memory]
-enabled = true
-# An idle session holding more than this many megabytes is worth a look.
-min_megabytes = 500
-
-[rules.orphaned_process]
-enabled = true
-
-[rules.duplicate_mcp_server]
-enabled = true
-
-[rules.concurrent_test_jobs]
-enabled = true
-# More than this many test workers at once is flagged.
-max_jobs = 3
-
-[rules.hot_process]
-enabled = true
-# A process above this CPU share for this long is flagged.
-cpu_percent = 90
-minutes = 10
-
-[rules.oversized_renderer]
-enabled = true
-min_megabytes = 2048
+swap_red_percent = 80.0
+swap_amber_percent = 50.0
+compressor_percent_of_ram = 25.0
+free_percent_min = 15.0
+idle_info_hours = 6.0
+idle_amber_hours = 24.0
+idle_cpu_max = 3.0
+busy_quiet_minutes = 45.0
+busy_quiet_cpu_max = 2.0
+orphan_min_age_minutes = 10.0
+orphan_red_mb = 500.0
+orphan_red_cpu = 25.0
+heavy_job_cpu = 40.0
+heavy_job_mb = 500.0
+heavy_jobs_allowed = 1
+duplicate_mcp_min_instances = 2
+duplicate_mcp_amber_mb = 100.0
+duplicate_mcp_red_mb = 500.0
+hot_child_cpu = 60.0
+hot_child_minutes = 15.0
+hot_child_red_cpu = 150.0
+renderer_mb = 1500.0
 
 [rules.model_fit]
 # Information only: a more powerful model than an idle or simple session needs.
