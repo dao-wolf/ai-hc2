@@ -14,11 +14,19 @@ from datetime import datetime
 from typing import Any
 
 from hc2.audit import canonical_json
-from hc2.model import SCHEMA_VERSION, Finding, Severity, SessionState, Snapshot
+from hc2.model import (
+    SCHEMA_VERSION,
+    Finding,
+    HarnessReport,
+    Severity,
+    SessionState,
+    Snapshot,
+)
 from hc2.rules.resources import RULE_MEMORY_PRESSURE
 from hc2.store import Acknowledgement, FindingRecord, ScanRecord, Store
 from hc2.text import truncate
 
+MB = 1024 * 1024
 TOP_LIMIT = 10
 CHANGE_LIMIT = 4
 TEXT_LIMIT = 200
@@ -26,6 +34,7 @@ TEXT_LIMIT = 200
 _RUNNING = frozenset(
     {SessionState.RUNNING_BUSY, SessionState.RUNNING_IDLE, SessionState.WAITING}
 )
+_OPEN = _RUNNING | {SessionState.STALE}
 _TIME_KEYS = ("generated", "scan_id", "scan_seconds", "next_scan_at", "content_hash")
 
 
@@ -80,6 +89,39 @@ def _pressure(snapshot: Snapshot) -> dict[str, Any] | None:
     }
 
 
+def _session_load(
+    snapshot: Snapshot, report: HarnessReport
+) -> tuple[float | None, float | None]:
+    """Memory in MB and CPU percent for the trees of a harness's running sessions.
+
+    A session marked stale is still open, so it counts. Both values are `None`
+    when the scan collected no process data. Otherwise they are sums over the
+    processes linked to those sessions, which is 0 when none has a process.
+    """
+    if snapshot.system is None and not snapshot.processes:
+        return None, None
+    running = {s.id for s in report.sessions if s.state in _OPEN}
+    linked = [p for p in snapshot.processes if p.session_id in running]
+    memory = sum(p.memory_bytes or 0 for p in linked) / MB
+    cpu = sum(p.cpu_percent or 0.0 for p in linked)
+    return round(memory, 1), round(cpu, 1)
+
+
+def _harness_entry(snapshot: Snapshot, report: HarnessReport) -> dict[str, Any]:
+    memory_mb, cpu_percent = _session_load(snapshot, report)
+    return {
+        "cpu_percent": cpu_percent,
+        "id": report.harness.id,
+        "memory_mb": memory_mb,
+        "name": report.harness.name,
+        "sessions_running": sum(1 for s in report.sessions if s.state in _RUNNING),
+        "sessions_stale": sum(
+            1 for s in report.sessions if s.state is SessionState.STALE
+        ),
+        "state": _harness_state(report.harness.installed),
+    }
+
+
 def build_status(
     snapshot: Snapshot,
     record: ScanRecord,
@@ -114,18 +156,7 @@ def build_status(
     new_ids = set(record.new_ids)
     new = _ranked(i for i in snapshot.findings if i.id in new_ids)
     gone = sorted(fixed, key=lambda i: (-i.severity.rank, i.finding_id))
-    harnesses = [
-        {
-            "id": report.harness.id,
-            "name": report.harness.name,
-            "sessions_running": sum(1 for s in report.sessions if s.state in _RUNNING),
-            "sessions_stale": sum(
-                1 for s in report.sessions if s.state is SessionState.STALE
-            ),
-            "state": _harness_state(report.harness.installed),
-        }
-        for report in snapshot.harnesses
-    ]
+    harnesses = [_harness_entry(snapshot, report) for report in snapshot.harnesses]
     payload: dict[str, Any] = {
         "approvals": {"oldest_at": None, "pending_count": 0, "top": []},
         "changes": {

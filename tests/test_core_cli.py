@@ -227,6 +227,9 @@ class StatusCommandTests(unittest.TestCase):
         self.assertEqual(by_id["fake-files"]["state"], "installed")
         self.assertEqual(by_id["fake-files"]["sessions_running"], 1)
         self.assertEqual(by_id["fake-files"]["sessions_stale"], 1)
+        # No process data was collected, so the new totals are null.
+        self.assertIsNone(by_id["fake-files"]["memory_mb"])
+        self.assertIsNone(by_id["fake-files"]["cpu_percent"])
         self.assertEqual(by_id["fake-raises"]["state"], "unknown")
         self.assertLess(len(out), 8 * 1024)
 

@@ -451,5 +451,73 @@ class RealCollectorTests(unittest.TestCase):
         self.assertEqual(linked, {100, 101})
 
 
+class StatusTotalsTests(unittest.TestCase):
+    def status(
+        self,
+        sessions: Sequence[Session],
+        nodes: Sequence[ProcessNode],
+        *,
+        collect: bool = True,
+    ) -> dict[str, dict[str, object]]:
+        with fake_home() as fake:
+            run_scan(
+                config_for(fake),
+                home=str(fake.home),
+                state=fake.state_dir,
+                adapters=[LinkedAdapter(sessions)],
+                collector=collector_for(nodes) if collect else None,
+                clock=lambda: NOW,
+            )
+            with Store.create(fake.state_dir) as store:
+                found = status_from_store(store, NOW)
+        assert found is not None
+        return {h["id"]: h for h in found[1]["harnesses"]}
+
+    def test_a_harness_reports_the_total_for_its_running_session_trees(self) -> None:
+        sessions = [
+            make_session("a", 10, since=HOUR),
+            make_session("b", 30, state=SessionState.RUNNING_BUSY, since=HOUR),
+            make_session("ended", 20, state=SessionState.ENDED),
+        ]
+        entry = self.status(sessions, TABLE)["fake-linked"]
+        # Trees 10-11-12 and 30-31. Process 20 belongs to an ended session.
+        self.assertEqual(entry["memory_mb"], 630.0)
+        self.assertEqual(entry["cpu_percent"], 2.0)
+        self.assertEqual(entry["sessions_running"], 2)
+
+    def test_stale_sessions_still_hold_their_trees(self) -> None:
+        sessions = [make_session("a", 10, since=7 * HOUR, last=7 * HOUR)]
+        entry = self.status(sessions, TABLE)["fake-linked"]
+        self.assertEqual(entry["sessions_stale"], 1)
+        self.assertEqual(entry["memory_mb"], 600.0)
+
+    def test_totals_are_zero_when_no_session_has_a_process(self) -> None:
+        found = self.status([make_session("a", None, since=HOUR)], TABLE)
+        entry = found["fake-linked"]
+        self.assertEqual((entry["memory_mb"], entry["cpu_percent"]), (0.0, 0.0))
+
+    def test_totals_are_null_without_process_data(self) -> None:
+        found = self.status([make_session("a", 10, since=HOUR)], (), collect=False)
+        entry = found["fake-linked"]
+        self.assertIsNone(entry["memory_mb"])
+        self.assertIsNone(entry["cpu_percent"])
+
+    def test_the_old_fields_are_all_still_there(self) -> None:
+        found = self.status([make_session("a", 10, since=HOUR)], TABLE)
+        entry = found["fake-linked"]
+        self.assertEqual(
+            sorted(entry),
+            [
+                "cpu_percent",
+                "id",
+                "memory_mb",
+                "name",
+                "sessions_running",
+                "sessions_stale",
+                "state",
+            ],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
