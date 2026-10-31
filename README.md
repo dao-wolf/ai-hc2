@@ -6,7 +6,7 @@ AI HC2 (AI Harness Command Center) is one local place to see and steer every AI 
 - **What's running:** sessions, models, processes and the resources they hold.
 - **What to fix:** findings with a plain-English reason and a fix.
 
-**Status: pre-alpha.** Version 0.0.1 is a skeleton. It has a data model, a `doctor` command and the project tooling. It does not scan anything yet. Expect breaking changes. See the [slices](docs/slices.md) for what ships when.
+**Status: pre-alpha.** Version 0.0.1 works from the command line for the Claude harnesses: the Claude Code CLI, the desktop Code tab and Cowork. `hc2 scan` stores a snapshot; `status`, `sessions` and `resources` show the state, sessions, process trees and findings; `doctor` checks the setup. There is no web dashboard, Mac app or MCP server yet. Expect breaking changes. See the [slices](docs/slices.md) for what ships when.
 
 ## Principles
 
