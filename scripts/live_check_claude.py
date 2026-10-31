@@ -24,7 +24,7 @@ from hc2.adapters.claude_desktop import ClaudeDesktopAdapter  # noqa: E402
 from hc2.model import SessionState  # noqa: E402
 
 
-def confidential_folders() -> tuple[tuple[str, ...], str]:
+def masked_folder_setup() -> tuple[tuple[str, ...], str]:
     """The configured folders and a count-only description of them."""
     config = paths.config_file()
     if not config.is_file():
@@ -42,31 +42,31 @@ def confidential_folders() -> tuple[tuple[str, ...], str]:
 
 
 def main() -> int:
-    folders, note = confidential_folders()
+    folders, setup = masked_folder_setup()
     ctx = AdapterContext(home=str(Path.home()), confidential_folders=folders)
-    print(f"confidential folders: {note}")
+    print(f"confidential folders: {setup}")
     started = time.monotonic()
-    total_installs = total_sessions = total_confidential = total_problems = 0
+    total_installs = total_sessions = total_masked = total_problems = 0
     exposed = 0
     for adapter in (ClaudeCodeAdapter(), ClaudeDesktopAdapter(), ClaudeCoworkAdapter()):
         report = adapter.scan(ctx)
         states = Counter(session.state for session in report.sessions)
-        confidential = sum(1 for s in report.sessions if s.confidential)
+        masked = sum(1 for s in report.sessions if s.confidential)
         exposed += sum(1 for s in report.sessions if s.confidential and s.title)
         total_installs += len(report.harness.installs)
         total_sessions += len(report.sessions)
-        total_confidential += confidential
+        total_masked += masked
         total_problems += len(report.problems)
         counts = " ".join(f"{s.value}={states.get(s, 0)}" for s in SessionState)
         print(
             f"{adapter.id}: installed={report.harness.installed} "
             f"installs={len(report.harness.installs)} "
             f"sessions={len(report.sessions)} {counts} "
-            f"confidential={confidential} problems={len(report.problems)}"
+            f"masked={masked} problems={len(report.problems)}"
         )
     print(
         f"total: installs={total_installs} sessions={total_sessions} "
-        f"confidential={total_confidential} problems={total_problems}"
+        f"masked={total_masked} problems={total_problems}"
     )
     print(f"confidential sessions with a title still set: {exposed}")
     print(f"scan time: {time.monotonic() - started:.2f}s")
