@@ -18,8 +18,8 @@ from hc2.model import (
     SCHEMA_VERSION,
     Finding,
     HarnessReport,
-    Severity,
     SessionState,
+    Severity,
     Snapshot,
 )
 from hc2.rules.resources import RULE_MEMORY_PRESSURE

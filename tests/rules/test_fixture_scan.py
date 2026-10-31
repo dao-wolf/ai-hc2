@@ -72,8 +72,9 @@ class FixtureScanTests(unittest.TestCase):
     def test_orphans_are_the_dev_server_and_the_automated_browser(self) -> None:
         titles = sorted(f.title for f in self.by_rule[R.RULE_ORPHAN])
         self.assertEqual(len(titles), 2)
-        self.assertTrue(any("node process is still running on port 5173" in t
-                            for t in titles))
+        self.assertTrue(
+            any("node process is still running on port 5173" in t for t in titles)
+        )
         self.assertTrue(any("Chromium" in t for t in titles))
         for finding in self.by_rule[R.RULE_ORPHAN]:
             self.assertNotIn("Everyday Browser", finding.title)

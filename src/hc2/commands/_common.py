@@ -12,10 +12,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from hc2.commands.resources import scan_collector
 from hc2.config import Config, Overrides, load_config
 from hc2.model import SCHEMA_VERSION, Snapshot
 from hc2.paths import state_dir
-from hc2.commands.resources import scan_collector
 from hc2.scan import run_scan
 from hc2.store import Store
 from hc2.summary import status_from_store

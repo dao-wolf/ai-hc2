@@ -218,7 +218,6 @@ class TreeScanTests(unittest.TestCase):
                 self.assertEqual(gate.list_files(root), ["real.txt"])
 
 
-
 class IdentityTests(unittest.TestCase):
     """The name and email git will put on a commit are checked too."""
 

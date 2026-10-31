@@ -62,7 +62,6 @@ def configured(fake: FakeHome) -> mock._patch_dict:  # type: ignore[type-arg]
     )
 
 
-
 def _no_resources(_config: object) -> object:
     """A collector that returns nothing, so unit tests never sample this machine."""
     return lambda _signatures: Resources()
@@ -134,9 +133,9 @@ class ScanCommandTests(unittest.TestCase):
     def test_flags_beat_the_environment(self) -> None:
         hang = HangingAdapter()
         self.addCleanup(hang.release)
-        with fake_home() as fake, registered(hang):
-            with mock.patch.dict(os.environ, {"HC2_ADAPTER_TIMEOUT_SECONDS": "30"}):
-                code, out, _ = run("scan", "--json", "--adapter-timeout", "0.2")
+        env = {"HC2_ADAPTER_TIMEOUT_SECONDS": "30"}
+        with fake_home(), registered(hang), mock.patch.dict(os.environ, env):
+            code, out, _ = run("scan", "--json", "--adapter-timeout", "0.2")
         self.assertEqual(code, 0)
         first = json.loads(out)["findings"][0]
         self.assertEqual(first["rule_id"], "adapter.unavailable")
@@ -176,7 +175,7 @@ class StatusCommandTests(unittest.TestCase):
         self.assertIn("AI HC2 status", out)
 
     def test_status_json_stays_quiet_about_the_first_scan(self) -> None:
-        with fake_home() as fake, registered(FileAdapter()):
+        with fake_home(), registered(FileAdapter()):
             _, _, err = run("status", "--json")
         self.assertEqual(err, "")
 
@@ -198,11 +197,23 @@ class StatusCommandTests(unittest.TestCase):
             run("scan")
             _, out, _ = run("status", "--json")
         data: dict[str, Any] = json.loads(out)
-        expected = (
-            "approvals changes content_hash counts generated harnesses level "
-            "next_scan_at pressure scan_error scan_id scan_seconds scan_state "
-            "schema top"
-        ).split()
+        expected = [
+            "approvals",
+            "changes",
+            "content_hash",
+            "counts",
+            "generated",
+            "harnesses",
+            "level",
+            "next_scan_at",
+            "pressure",
+            "scan_error",
+            "scan_id",
+            "scan_seconds",
+            "scan_state",
+            "schema",
+            "top",
+        ]
         self.assertEqual(sorted(data), expected)
         self.assertEqual(data["level"], "amber")
         self.assertEqual(
@@ -313,10 +324,19 @@ class SessionsCommandTests(unittest.TestCase):
         ids = [s["id"] for s in data["sessions"]]
         self.assertEqual(ids, ["sess-1", "sess-3", "sess-2"])
         first = data["sessions"][0]
-        keys = (
-            "id harness_id title folder model created last_activity state origin "
-            "confidential field_sources"
-        ).split()
+        keys = [
+            "id",
+            "harness_id",
+            "title",
+            "folder",
+            "model",
+            "created",
+            "last_activity",
+            "state",
+            "origin",
+            "confidential",
+            "field_sources",
+        ]
         for key in keys:
             self.assertIn(key, first)
         self.assertEqual(out, json.dumps(data, sort_keys=True, indent=2) + "\n")
@@ -340,7 +360,7 @@ class SessionsCommandTests(unittest.TestCase):
         self.assertEqual(data["count"], 3)
 
     def test_an_unknown_harness_is_a_misuse_with_a_hint(self) -> None:
-        with fake_home() as fake, registered(FileAdapter()):
+        with fake_home(), registered(FileAdapter()):
             code, out, _ = run("sessions", "--harness", "nope")
             jcode, jout, _ = run("sessions", "--json", "--harness", "nope")
         self.assertEqual(code, 2)
@@ -409,10 +429,9 @@ class PrivacyTests(unittest.TestCase):
                     self.assertNotIn(sentinel, text)
 
     def test_masked_sessions_still_show_a_label(self) -> None:
-        with fake_home() as fake, configured(fake):
-            with registered(FileAdapter()):
-                fake.write_sessions(rows_with_term(fake))
-                _, out, _ = run("sessions", "--json")
+        with fake_home() as fake, configured(fake), registered(FileAdapter()):
+            fake.write_sessions(rows_with_term(fake))
+            _, out, _ = run("sessions", "--json")
         sessions = {s["id"]: s for s in json.loads(out)["sessions"]}
         self.assertEqual(sessions["sess-3"]["title"], "Confidential A")
         self.assertEqual(sessions["sess-4"]["title"], "Confidential (by title)")

@@ -213,15 +213,14 @@ class AuditTests(unittest.TestCase):
 
     def test_damaged_and_blank_lines_are_reported(self) -> None:
         for bad in ("{not json", "", "[1, 2]", '{"attributes": {}}'):
-            with self.subTest(bad=bad):
-                with tempfile.TemporaryDirectory() as tmp:
-                    log = AuditLog(Path(tmp) / "audit")
-                    log.append(make_event(0))
-                    path = log.files()[0]
-                    path.write_text(path.read_text() + bad + "\n")
-                    report = log.verify_chain()
-                    assert report.first_break is not None
-                    self.assertEqual(report.first_break.line, 2)
+            with self.subTest(bad=bad), tempfile.TemporaryDirectory() as tmp:
+                log = AuditLog(Path(tmp) / "audit")
+                log.append(make_event(0))
+                path = log.files()[0]
+                path.write_text(path.read_text() + bad + "\n")
+                report = log.verify_chain()
+                assert report.first_break is not None
+                self.assertEqual(report.first_break.line, 2)
 
     def test_appending_after_a_half_written_line_still_works(self) -> None:
         self.fill(2)

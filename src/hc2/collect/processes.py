@@ -569,4 +569,3 @@ def total_memory(nodes: Iterable[ProcessNode]) -> int:
 def total_cpu(nodes: Iterable[ProcessNode]) -> float:
     """Sum of known CPU percent."""
     return sum(node.cpu_percent or 0.0 for node in nodes)
-

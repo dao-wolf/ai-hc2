@@ -185,9 +185,7 @@ class LinkingTests(unittest.TestCase):
         activities = session_activities(
             [make_session("b", 10), make_session("a", 11)], NOW
         )
-        self.assertEqual(
-            link_processes(TABLE, activities), {10: "b", 11: "a", 12: "a"}
-        )
+        self.assertEqual(link_processes(TABLE, activities), {10: "b", 11: "a", 12: "a"})
 
     def test_a_pid_that_is_not_in_the_table_links_nothing(self) -> None:
         with fake_home() as fake:
@@ -214,9 +212,7 @@ class ActivityTests(unittest.TestCase):
         self.assertEqual(item.root_pid, 10)
 
     def test_age_falls_back_to_last_activity(self) -> None:
-        (item,) = session_activities(
-            [make_session("a", 10, last=8 * HOUR)], NOW
-        )
+        (item,) = session_activities([make_session("a", 10, last=8 * HOUR)], NOW)
         self.assertEqual(item.state_age_seconds, 8 * HOUR)
 
     def test_state_since_beats_last_activity(self) -> None:
@@ -237,9 +233,7 @@ class ActivityTests(unittest.TestCase):
         self.assertEqual(second.state_age_seconds, 0)
 
     def test_only_sessions_with_a_pid_are_listed(self) -> None:
-        found = session_activities(
-            [make_session("a", None), make_session("b", 5)], NOW
-        )
+        found = session_activities([make_session("a", None), make_session("b", 5)], NOW)
         self.assertEqual([i.session_id for i in found], ["b"])
 
 
@@ -262,9 +256,7 @@ class SessionRuleTests(unittest.TestCase):
 
     def test_pressure_from_the_collector_lifts_the_severity(self) -> None:
         with fake_home() as fake:
-            built = build(
-                fake, [make_session("a", 10, since=7 * HOUR)], pressured=True
-            )
+            built = build(fake, [make_session("a", 10, since=7 * HOUR)], pressured=True)
         (finding,) = by_rule(built, rules.RULE_IDLE_SESSION)
         self.assertIs(finding.severity, Severity.AMBER)
 

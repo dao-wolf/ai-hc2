@@ -64,9 +64,7 @@ def run(
     sessions: list[R.SessionActivity] | None = None,
     **kwargs: Any,
 ) -> tuple[R.Finding, ...]:
-    return R.evaluate(
-        sys_reading or reading(), nodes or [], sessions or [], **kwargs
-    )
+    return R.evaluate(sys_reading or reading(), nodes or [], sessions or [], **kwargs)
 
 
 def only(findings: tuple[R.Finding, ...], rule: str) -> list[R.Finding]:
@@ -142,10 +140,15 @@ class IdleSessionTests(unittest.TestCase):
         root = node(10, "agent", ppid=1, role=R_.HARNESS, cpu=cpu, mb=200, harness="h1")
         return [root, *(extra or [])]
 
-    def find(self, sess: R.SessionActivity, nodes: list[ProcessNode] | None = None,
-             **kwargs: Any) -> list[R.Finding]:
-        return only(run(nodes or self.nodes(), sessions=[sess], **kwargs),
-                    R.RULE_IDLE_SESSION)
+    def find(
+        self,
+        sess: R.SessionActivity,
+        nodes: list[ProcessNode] | None = None,
+        **kwargs: Any,
+    ) -> list[R.Finding]:
+        return only(
+            run(nodes or self.nodes(), sessions=[sess], **kwargs), R.RULE_IDLE_SESSION
+        )
 
     def test_age_edges(self) -> None:
         self.assertEqual(self.find(idle(6 * HOUR - 1)), [])
@@ -158,8 +161,12 @@ class IdleSessionTests(unittest.TestCase):
 
     def test_waiting_counts_and_other_states_do_not(self) -> None:
         self.assertEqual(len(self.find(session(SessionState.WAITING, 7 * HOUR))), 1)
-        for state in (SessionState.RUNNING_BUSY, SessionState.STALE,
-                      SessionState.ENDED, SessionState.UNKNOWN):
+        for state in (
+            SessionState.RUNNING_BUSY,
+            SessionState.STALE,
+            SessionState.ENDED,
+            SessionState.UNKNOWN,
+        ):
             self.assertEqual(self.find(session(state, 30 * HOUR)), [], state)
 
     def test_cpu_edge_is_strict(self) -> None:
@@ -278,8 +285,12 @@ class ConcurrentTestTests(unittest.TestCase):
         return [
             node(base, "node", ppid=1, role=R_.TEST_WORKER, cpu=cpu / 2, mb=mb / 2),
             node(
-                base + 1, "node", ppid=base, role=R_.TEST_WORKER,
-                cpu=cpu / 2, mb=mb / 2,
+                base + 1,
+                "node",
+                ppid=base,
+                role=R_.TEST_WORKER,
+                cpu=cpu / 2,
+                mb=mb / 2,
             ),
         ]
 
@@ -379,8 +390,16 @@ class HotChildTests(unittest.TestCase):
         return only(run(nodes, **kwargs), R.RULE_HOT_CHILD)
 
     def hot(self, cpu: float, minutes: float, **kwargs: Any) -> ProcessNode:
-        return node(5, "watcher", ppid=2, role=R_.OTHER, cpu=cpu, minutes=minutes,
-                    harness="h1", **kwargs)
+        return node(
+            5,
+            "watcher",
+            ppid=2,
+            role=R_.OTHER,
+            cpu=cpu,
+            minutes=minutes,
+            harness="h1",
+            **kwargs,
+        )
 
     def test_edges(self) -> None:
         self.assertEqual(self.find([self.hot(59.9, 60)]), [])
@@ -453,8 +472,13 @@ class ThresholdsTests(unittest.TestCase):
 
     def test_from_mapping(self) -> None:
         th = R.Thresholds.from_mapping(
-            {"swap_red_percent": 90, "heavy_jobs_allowed": 3.0, "orphan_red_mb": True,
-             "bogus": 1, "idle_cpu_max": "high"}
+            {
+                "swap_red_percent": 90,
+                "heavy_jobs_allowed": 3.0,
+                "orphan_red_mb": True,
+                "bogus": 1,
+                "idle_cpu_max": "high",
+            }
         )
         self.assertEqual(th.swap_red_percent, 90.0)
         self.assertIsInstance(th.swap_red_percent, float)

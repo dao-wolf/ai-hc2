@@ -35,9 +35,7 @@ def select_sessions(
 
 def render_sessions(snapshot: Snapshot, sessions: list[Session]) -> str:
     """The plain-English table."""
-    head = (
-        f"{plural(len(sessions), 'session')} from the scan at {snapshot.generated}."
-    )
+    head = f"{plural(len(sessions), 'session')} from the scan at {snapshot.generated}."
     if not sessions:
         return head + " None match."
     rows = [

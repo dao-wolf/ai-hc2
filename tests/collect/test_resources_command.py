@@ -112,9 +112,11 @@ class RenderTests(unittest.TestCase):
     def test_json(self) -> None:
         args = argparse.Namespace(json=True)
         out = io.StringIO()
-        with contextlib.redirect_stdout(out), mock.patch.object(
-            C, "sample", return_value=report()
-        ), mock.patch.object(C, "known_signatures", return_value=[]):
+        with (
+            contextlib.redirect_stdout(out),
+            mock.patch.object(C, "sample", return_value=report()),
+            mock.patch.object(C, "known_signatures", return_value=[]),
+        ):
             self.assertEqual(C.run(args), 0)
         data = json.loads(out.getvalue())
         self.assertEqual(data["schema"], SCHEMA_VERSION)

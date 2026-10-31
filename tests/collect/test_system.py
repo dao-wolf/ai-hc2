@@ -23,8 +23,10 @@ class ParserTests(unittest.TestCase):
     def test_swap(self) -> None:
         value = S.parse_sysctl(fixture("sysctl.txt"))["vm.swapusage"]
         self.assertEqual(S.parse_swap(value), (4096 * 1024**2, 2048 * 1024**2))
-        self.assertEqual(S.parse_swap("total = 1.5G  used = 0.50G  free = 1G"),
-                         (int(1.5 * GB), int(0.5 * GB)))
+        self.assertEqual(
+            S.parse_swap("total = 1.5G  used = 0.50G  free = 1G"),
+            (int(1.5 * GB), int(0.5 * GB)),
+        )
         self.assertEqual(S.parse_swap(None), (None, None))
         self.assertEqual(S.parse_swap("garbage"), (None, None))
 
@@ -89,7 +91,9 @@ class ReadingTests(unittest.TestCase):
             self.assertEqual(reading.kernel_level, name)
         odd = S.build_reading(
             sysctl="kern.memorystatus_vm_pressure_level: 3\n",
-            vm_stat="", memory_pressure="", pmset="",
+            vm_stat="",
+            memory_pressure="",
+            pmset="",
         )
         self.assertIsNone(odd.kernel_level)
 

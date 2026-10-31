@@ -282,8 +282,7 @@ def main(argv: Iterable[str] | None = None) -> int:
     for hit in hits:
         print(hit)
     print(
-        f"privacy gate: scanned {scanned} files, skipped {skipped}, "
-        f"{len(hits)} hits.",
+        f"privacy gate: scanned {scanned} files, skipped {skipped}, {len(hits)} hits.",
         file=sys.stderr,
     )
     return 1 if hits else 0

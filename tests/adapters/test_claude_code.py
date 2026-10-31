@@ -257,9 +257,7 @@ class ConfidentialTests(unittest.TestCase):
     def test_a_live_session_without_a_transcript_can_be_flagged(self) -> None:
         with fake_home() as home:
             ctx = context(home, ("/home/alice/projects",))
-            adapter = ClaudeCodeAdapter(
-                fake_probe(), [str(home / ".local" / "bin")]
-            )
+            adapter = ClaudeCodeAdapter(fake_probe(), [str(home / ".local" / "bin")])
             sessions = by_id(adapter.scan(ctx))
         self.assertTrue(sessions["live-only-0001"].confidential)
         self.assertIsNone(sessions["live-only-0001"].title)

@@ -336,9 +336,7 @@ class Redactor:
         title = session.title
         if self._hide_titles and title is not None:
             title = HIDDEN_TITLE
-        return replace(
-            clean, title=self.text(title), folder=self.text(session.folder)
-        )
+        return replace(clean, title=self.text(title), folder=self.text(session.folder))
 
     def install(self, install: Install) -> Install:
         """Redact an install's version and location."""

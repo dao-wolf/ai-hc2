@@ -40,6 +40,7 @@ from typing import Generic, TypeVar
 import hc2.adapters as adapter_registry
 from hc2.adapters.base import Adapter, AdapterContext, AdapterReport, ProcessSignature
 from hc2.audit import AuditLog, ChainBreak, canonical_json
+from hc2.collect.processes import ProcessIndex
 from hc2.config import Config
 from hc2.model import (
     SCHEMA_VERSION,
@@ -61,7 +62,6 @@ from hc2.model import (
     SystemSample,
     stable_id,
 )
-from hc2.collect.processes import ProcessIndex
 from hc2.redact import Redactor, normalise_folder
 from hc2.rules.resources import SessionActivity
 from hc2.store import FindingRecord, ScanRecord, Store
@@ -200,9 +200,7 @@ _FIX_PROBLEM = (
 )
 
 
-def _adapter_findings(
-    report: HarnessReport, failure: str | None
-) -> list[Finding]:
+def _adapter_findings(report: HarnessReport, failure: str | None) -> list[Finding]:
     harness = report.harness
     findings: list[Finding] = []
     for problem in report.problems:
@@ -496,9 +494,7 @@ def build_snapshot(
     )
     deadline = time.monotonic() + config.adapter_timeout_seconds
     jobs = [(item, _adapter_job(item, context)) for item in chosen]
-    resource_job = (
-        _collector_job(collector, _signatures(chosen)) if collector else None
-    )
+    resource_job = _collector_job(collector, _signatures(chosen)) if collector else None
 
     reports: list[HarnessReport] = []
     reported: list[Session] = []

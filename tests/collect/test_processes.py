@@ -268,9 +268,7 @@ class CollectTests(unittest.TestCase):
             return fixture("lsof_cwd.txt")
 
         cwds = P.read_cwds([401, 300, 300, -5], runner=run)
-        self.assertEqual(
-            calls, [("lsof", "-a", "-p", "300,401", "-d", "cwd", "-Fn")]
-        )
+        self.assertEqual(calls, [("lsof", "-a", "-p", "300,401", "-d", "cwd", "-Fn")])
         self.assertEqual(cwds[401], "/home/alice/sentinel-project/packages/app")
         self.assertEqual(P.read_cwds([], runner=run), {})
         self.assertEqual(len(calls), 1)

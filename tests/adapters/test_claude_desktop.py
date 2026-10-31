@@ -73,9 +73,7 @@ class DesktopSessionTests(unittest.TestCase):
         cls.sessions = by_id(cls.report)
 
     def test_which_sessions_are_listed(self) -> None:
-        self.assertEqual(
-            set(self.sessions), {f"local_000{n}" for n in range(1, 7)}
-        )
+        self.assertEqual(set(self.sessions), {f"local_000{n}" for n in range(1, 7)})
 
     def test_fields_come_from_the_index(self) -> None:
         first = self.sessions["local_0001"]

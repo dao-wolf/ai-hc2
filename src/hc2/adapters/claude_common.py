@@ -200,8 +200,7 @@ def _sentence(kind: str, label: str, count: int) -> str:
         "not in a format this version understands.",
         "processes_unknown": "could not check which Claude processes are "
         "running, so session states are unknown.",
-        "app_plist": "the app's version could not be read from its "
-        "information file.",
+        "app_plist": "the app's version could not be read from its information file.",
         "cli_version": "Claude Code was found but its version could not be "
         "worked out from the install.",
         "scan_failed": "the scan failed unexpectedly, so nothing was listed.",

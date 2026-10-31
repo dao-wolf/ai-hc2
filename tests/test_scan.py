@@ -32,6 +32,7 @@ from hc2.model import (
     ProcessNode,
     SessionState,
     Severity,
+    Snapshot,
     SystemSample,
 )
 from hc2.scan import Resources, ScanResult, build_snapshot, run_scan

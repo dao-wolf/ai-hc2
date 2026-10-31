@@ -83,7 +83,7 @@ class Thresholds:
     def from_mapping(cls, data: Mapping[str, Any]) -> Thresholds:
         """Override defaults from config values. Unknown or bad keys are ignored."""
         defaults = cls()
-        changes: dict[str, float | int] = {}
+        changes: dict[str, Any] = {}
         for item in fields(cls):
             value = data.get(item.name)
             if isinstance(value, bool) or not isinstance(value, int | float):
@@ -279,9 +279,7 @@ def memory_pressure(reading: SystemReading, th: Thresholds) -> list[Finding]:
 # --------------------------------------------------------------------------
 
 
-def _session_tree(
-    index: ProcessIndex, session: SessionActivity
-) -> list[ProcessNode]:
+def _session_tree(index: ProcessIndex, session: SessionActivity) -> list[ProcessNode]:
     return [] if session.root_pid is None else index.subtree(session.root_pid)
 
 
@@ -420,10 +418,7 @@ def orphans(nodes: Sequence[ProcessNode], th: Thresholds) -> list[Finding]:
                 f"{_duration(oldest)}. Memory used: {_size(total_memory(group))}; "
                 f"CPU: {total_cpu(group):.0f}%.",
                 "Suggested action: check what it is for and stop it from a "
-                "terminal if you no longer need it"
-                + extra
-                + ". "
-                + NOTHING_RUNS,
+                "terminal if you no longer need it" + extra + ". " + NOTHING_RUNS,
                 _subject(name, *(f"p{port}" for port in ports)),
                 harness_id=_common_harness(group),
             )

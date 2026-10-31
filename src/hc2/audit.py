@@ -50,9 +50,7 @@ _TAIL_BYTES = 8192
 
 def canonical_json(record: Mapping[str, Any]) -> str:
     """The one JSON spelling that hashes are taken over: sorted, compact."""
-    return json.dumps(
-        record, sort_keys=True, separators=(",", ":"), ensure_ascii=False
-    )
+    return json.dumps(record, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
 def record_hash(record: Mapping[str, Any]) -> str:
