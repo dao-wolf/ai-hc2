@@ -253,6 +253,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="exit 2 if the deny-list file is missing, instead of a notice",
     )
+    parser.add_argument(
+        "--check-identity",
+        action="store_true",
+        help="also check the author and committer git will use (the pre-commit "
+        "hook passes this; CI runners have no real identity to check)",
+    )
     return parser
 
 
@@ -278,7 +284,8 @@ def main(argv: Iterable[str] | None = None) -> int:
                 file=sys.stderr,
             )
     hits, scanned, skipped = scan_tree(args.root, terms)
-    hits = sorted(set(hits) | set(scan_identity(args.root, terms)))
+    if args.check_identity:
+        hits = sorted(set(hits) | set(scan_identity(args.root, terms)))
     for hit in hits:
         print(hit)
     print(
