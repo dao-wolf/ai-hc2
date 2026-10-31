@@ -30,3 +30,7 @@ acknowledged.json
 plan.json
 config.toml
 !examples/config.toml
+
+# Local Claude Code working files (session worktrees, personal settings). Never commit.
+.claude/worktrees/
+.claude/settings.local.json
