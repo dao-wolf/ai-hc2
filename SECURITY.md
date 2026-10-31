@@ -2,7 +2,9 @@
 
 ## Reporting a vulnerability
 
-Please report security problems **privately**, using GitHub's private vulnerability reporting:
+Please report security problems **privately**, using GitHub's private vulnerability reporting: [report a vulnerability](https://github.com/dao-wolf/ai-hc2/security/advisories/new).
+
+If that link doesn't work for you:
 
 1. Open this repository on GitHub.
 2. Go to the **Security** tab.
