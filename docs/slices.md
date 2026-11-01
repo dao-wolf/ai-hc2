@@ -29,6 +29,19 @@ Each slice ships something usable on its own, and each one keeps every earlier s
 | **S10 Collaboration** | Notes threads, attribution for several LLMs, a local model through an MCP-capable client | FR-13 | Two LLM clients add notes to one finding, and both are attributed in the audit trail. |
 | **S11 Packaging** | One-command install, start at login, retention, upgrade path, signed Mac app | Op-1 to Op-3 | A fresh-machine install takes under 5 minutes, and `hc2 doctor` is clean. |
 
+### Optional lane: repository health (FR-18)
+
+A parallel lane that touches nothing in S3 or S4 until R3. The design is in [research/repo-health.md](research/repo-health.md), and the decisions in [ADR 0002](adr/0002-how-hc2-reads-repositories.md).
+
+| Slice | Delivers | Requirements | Done when |
+|---|---|---|---|
+| **R0 Decide** | FR-18, ADR 0002, threat-model rows 27 to 32, the research page | FR-18, OS-3, S-6 | The maintainer approves FR-18. |
+| **R1 Bronze CLI** | GitHub collector with GraphQL batching, ETags and a cache; the Bronze checks; `hc2 repos` and `--json`; made-up fixtures | FR-18, S-1 | Golden tests pass offline. A live run lists every repo, with a level for each scored one. A test enforces the `gh` allow-list. |
+| **R1b Local clones** | The local collector, the Local track and column; confidential folders skipped | FR-18, P-2 | Fixtures cover every Local check. A test proves no git command runs in a confidential folder, and another that every call carries the settings in ADR 0002, decision 6. |
+| **R2 Silver, Gold and custom checks** | The remaining checks, the `[[repo_checks]]` kinds, private-repo applicability, `enforce_from`, waivers through acknowledgements | FR-18, FR-9 | A new config check works without code. The PR rule keeps no PR text (privacy test). Fixtures cover pass, fail, waived, not applicable and unknown. A golden test with a made-up Scorecard alert whose message says a policy file was detected but has no linked content proves the finding reports "policy found, no contact link", not "no security policy". PR-rule fixtures prove that fewer qualifying PRs than `min_prs` give "unknown (n of `min_prs` needed)" and leave the level unchanged, that a `Bot` PR is left out, and that adding a failing open PR changes the evidence but not the result. |
+| **R3 Dashboard page** | The "Repositories" section: overview and detail pages | FR-14, X-1 to X-4 | axe finds 0 violations. Keyboard walkthrough passes. Private repo names never appear unless opted in. Starts after S4. |
+| **R4 History and MCP** | Trend arrows, "last change", a `repo_health` MCP read tool | FR-12, FR-18 | An LLM client can read results and only propose. Ships with S6. |
+
 ## Test strategy
 
 - **Fixtures.**
