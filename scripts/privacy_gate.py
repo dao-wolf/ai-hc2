@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Privacy gate: stop personal data reaching the public repo.
 
-It scans every tracked file, plus untracked files that git does not ignore,
-against two sets of checks:
+By default it scans every tracked file, plus untracked files that git does not
+ignore, as they are on disk. With --staged it scans the staged copy of each
+file instead, which is what the next commit will hold. With --message it scans
+only a commit message file. Two sets of checks run:
 
 1. A personal deny-list that lives outside the repo. Its path comes from the
    environment variable HC2_PRIVACY_DENYLIST, and defaults to
@@ -29,7 +31,7 @@ import os
 import re
 import subprocess
 import sys
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -73,6 +75,11 @@ SECRET_PATTERNS = (
         re.compile(r"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----"),
     ),
 )
+
+# `git commit -v` adds the diff below this line of the message file, and git
+# drops it from the message. The gate drops it too, or the diff of a commit
+# that removes a leak would block that commit.
+SCISSORS_RE = re.compile(r"^\S+ -{24} >8 -{24}$", re.MULTILINE)
 
 
 @dataclass(frozen=True, order=True)
@@ -182,27 +189,81 @@ def list_files(root: Path) -> list[str]:
     return sorted(found)
 
 
-def scan_tree(
-    root: Path, terms: Sequence[Term], generic: bool = True
+def scan_files(
+    sizes: dict[str, int],
+    read: Callable[[str], bytes],
+    terms: Sequence[Term],
+    generic: bool = True,
 ) -> tuple[list[Hit], int, int]:
-    """Scan a folder. Returns the hits, files scanned and files skipped."""
+    """Scan files by name. Returns the hits, files scanned and files skipped."""
     hits: list[Hit] = []
     scanned = skipped = 0
-    for name in list_files(root):
+    for name, size in sizes.items():
         hits.extend(scan_name(name, terms))
-        file = root / name
-        if file.stat().st_size > MAX_BYTES:
+        if size > MAX_BYTES:
             skipped += 1
             note = f"privacy gate: skipped {name} (over {MAX_BYTES} bytes)"
             print(note, file=sys.stderr)
             continue
-        data = file.read_bytes()
+        data = read(name)
         if b"\0" in data[:8192]:
             skipped += 1
             continue
         scanned += 1
         hits.extend(scan_text(name, data.decode("utf-8", "replace"), terms, generic))
     return sorted(set(hits)), scanned, skipped
+
+
+def scan_tree(
+    root: Path, terms: Sequence[Term], generic: bool = True
+) -> tuple[list[Hit], int, int]:
+    """Scan a folder's files as they are on disk."""
+    sizes = {name: (root / name).stat().st_size for name in list_files(root)}
+    return scan_files(sizes, lambda name: (root / name).read_bytes(), terms, generic)
+
+
+def staged_files(root: Path) -> dict[str, bytes]:
+    """The staged copy of every file in git's index, by path.
+
+    A link's copy is the target path it stores. Submodules are skipped. Raises
+    OSError or CalledProcessError when git or the index can't be read.
+    """
+    command = ["git", "-C", str(root), "ls-files", "--stage", "-z"]
+    listing = subprocess.run(command, capture_output=True, check=True).stdout
+    entries: list[tuple[str, bytes]] = []
+    for record in filter(None, listing.split(b"\0")):
+        info, name = record.split(b"\t", 1)
+        mode, object_id, _stage = info.split()
+        if mode != b"160000":
+            entries.append((name.decode("utf-8", "replace"), object_id))
+    command = ["git", "-C", str(root), "cat-file", "--batch"]
+    ids = b"".join(object_id + b"\n" for _, object_id in entries)
+    out = subprocess.run(command, input=ids, capture_output=True, check=True).stdout
+    files: dict[str, bytes] = {}
+    at = 0
+    for name, _ in entries:
+        # Each object comes back as "<id> <type> <size>\n<content>\n".
+        start = out.index(b"\n", at) + 1
+        size = int(out[at:start].split()[2])
+        files[name] = out[start : start + size]
+        at = start + size + 1
+    return files
+
+
+def scan_index(
+    root: Path, terms: Sequence[Term], generic: bool = True
+) -> tuple[list[Hit], int, int]:
+    """Scan what the next commit will hold, leaving out unstaged edits."""
+    files = staged_files(root)
+    sizes = {name: len(data) for name, data in files.items()}
+    return scan_files(sizes, files.__getitem__, terms, generic)
+
+
+def scan_message(path: Path, terms: Sequence[Term]) -> list[Hit]:
+    """Scan a commit message file, as git passes it to the commit-msg hook."""
+    text = path.read_text(encoding="utf-8", errors="replace")
+    message = SCISSORS_RE.split(text, maxsplit=1)[0]
+    return scan_text("<commit message>", message, terms)
 
 
 def scan_identity(root: Path, terms: Sequence[Term]) -> list[Hit]:
@@ -259,6 +320,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="also check the author and committer git will use (the pre-commit "
         "hook passes this; CI runners have no real identity to check)",
     )
+    source = parser.add_mutually_exclusive_group()
+    source.add_argument(
+        "--staged",
+        action="store_true",
+        help="scan the staged copy of each file, which the next commit will "
+        "hold, instead of the files on disk (the pre-commit hook passes this)",
+    )
+    source.add_argument(
+        "--message",
+        type=Path,
+        metavar="FILE",
+        help="scan only this commit message file (the commit-msg hook passes this)",
+    )
     return parser
 
 
@@ -283,15 +357,22 @@ def main(argv: Iterable[str] | None = None) -> int:
                 "running generic checks only.",
                 file=sys.stderr,
             )
-    hits, scanned, skipped = scan_tree(args.root, terms)
+    try:
+        if args.message:
+            hits = scan_message(args.message, terms)
+            summary = "scanned the commit message"
+        else:
+            scan = scan_index if args.staged else scan_tree
+            hits, scanned, skipped = scan(args.root, terms)
+            summary = f"scanned {scanned} files, skipped {skipped}"
+    except (OSError, subprocess.CalledProcessError):
+        print("privacy gate: could not read what it had to scan.", file=sys.stderr)
+        return 2
     if args.check_identity:
         hits = sorted(set(hits) | set(scan_identity(args.root, terms)))
     for hit in hits:
         print(hit)
-    print(
-        f"privacy gate: scanned {scanned} files, skipped {skipped}, {len(hits)} hits.",
-        file=sys.stderr,
-    )
+    print(f"privacy gate: {summary}, {len(hits)} hits.", file=sys.stderr)
     return 1 if hits else 0
 
 
