@@ -10,6 +10,7 @@ import contextlib
 import importlib.util
 import io
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -333,6 +334,38 @@ class CommandLineTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("generic checks only", err)
 
+    def test_staged_scans_what_the_commit_will_hold(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root, deny = self.setup_repo(tmp, "the zorblax plan\n")
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            subprocess.run(["git", "-C", str(root), "add", "notes.md"], check=True)
+            (root / "notes.md").write_text("clean now\n")
+            (root / "draft.md").write_text("zorblax\n")
+            args = ("--root", str(root), "--denylist", str(deny))
+            on_disk = self.run_gate(*args)[:2]
+            staged = self.run_gate(*args, "--staged")[:2]
+        self.assertEqual(on_disk, (1, "draft.md:1 term#2\n"))
+        self.assertEqual(staged, (1, "notes.md:1 term#2\n"))
+
+    def test_staged_outside_a_repository_exits_2(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root, deny = self.setup_repo(tmp, "x\n")
+            args = ("--root", str(root), "--denylist", str(deny), "--staged")
+            code, _, _ = self.run_gate(*args, env={"GIT_CEILING_DIRECTORIES": tmp})
+        self.assertEqual(code, 2)
+
+    def test_message_scans_only_the_commit_message(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root, deny = self.setup_repo(tmp, "zorblax\n")
+            message = Path(tmp) / "COMMIT_EDITMSG"
+            message.write_text(f"fix: thank Quentin Example\n\nby jane{AT}corp.org\n")
+            args = ("--root", str(root), "--denylist", str(deny))
+            code, out, err = self.run_gate(*args, "--message", str(message))
+        self.assertEqual(code, 1)
+        self.assertEqual(out, "<commit message>:1 term#6\n<commit message>:3 email\n")
+        for secret in ["quentin", "zorblax", "corp"]:
+            self.assertNotIn(secret, (out + err).lower())
+
     def test_default_denylist_path(self) -> None:
         with mock.patch.dict(os.environ, {"HC2_PRIVACY_DENYLIST": ""}):
             path = gate.resolve_denylist(None)
@@ -344,6 +377,81 @@ class CommandLineTests(unittest.TestCase):
             chosen = gate.resolve_denylist("/from/option.txt")
             self.assertEqual(chosen, Path("/from/option.txt"))
             self.assertEqual(gate.resolve_denylist(None), Path("/from/env.txt"))
+
+
+class HookTests(unittest.TestCase):
+    """The hooks that scripts/install-hooks.sh writes, run by a real commit."""
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name) / "repo"
+        (self.root / "scripts").mkdir(parents=True)
+        for name in ["privacy_gate.py", "install-hooks.sh"]:
+            shutil.copy(SCRIPT.parent / name, self.root / "scripts")
+        denylist = Path(tmp.name) / "denylist.txt"
+        denylist.write_text(DENYLIST)
+        email = "alice" + AT + "example.com"
+        # Drop GIT_DIR and the like, so a run from inside a hook can't commit here.
+        self.env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        self.env |= {
+            "HC2_PRIVACY_DENYLIST": str(denylist),
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_CEILING_DIRECTORIES": tmp.name,
+            "GIT_EDITOR": "true",
+            "GIT_AUTHOR_NAME": "alice",
+            "GIT_AUTHOR_EMAIL": email,
+            "GIT_COMMITTER_NAME": "alice",
+            "GIT_COMMITTER_EMAIL": email,
+        }
+        self.run_in_repo("git", "init", "-q")
+        self.notes = self.root / "notes.md"
+
+    def run_in_repo(self, *argv: str) -> tuple[int, str]:
+        done = subprocess.run(
+            argv, cwd=self.root, env=self.env, capture_output=True, text=True
+        )
+        return done.returncode, done.stdout + done.stderr
+
+    def install(self) -> tuple[int, str]:
+        return self.run_in_repo("sh", "scripts/install-hooks.sh")
+
+    def test_install_keeps_a_foreign_hook_and_still_writes_the_other(self) -> None:
+        foreign = self.root / ".git" / "hooks" / "commit-msg"
+        foreign.parent.mkdir(exist_ok=True)
+        foreign.write_text("#!/bin/sh\nexit 0\n")
+        code, output = self.install()
+        self.assertEqual(code, 1)
+        self.assertIn("A different commit-msg hook already exists", output)
+        self.assertEqual(foreign.read_text(), "#!/bin/sh\nexit 0\n")
+        self.assertTrue((self.root / ".git" / "hooks" / "pre-commit").is_file())
+
+    def test_pre_commit_blocks_a_term_in_the_staged_copy(self) -> None:
+        self.assertEqual(self.install()[0], 0)
+        self.notes.write_text("the zorblax plan\n")
+        self.run_in_repo("git", "add", "notes.md")
+        self.notes.write_text("clean now\n")
+        code, output = self.run_in_repo("git", "commit", "-m", "docs: add notes")
+        self.assertNotEqual(code, 0)
+        self.assertIn("notes.md:1 term#2", output)
+
+    def test_commit_msg_blocks_a_term_but_not_the_diff_below_the_scissors(
+        self,
+    ) -> None:
+        self.notes.write_text("the zorblax plan\n")
+        self.run_in_repo("git", "add", "notes.md")
+        self.run_in_repo("git", "commit", "-q", "-m", "docs: add notes")
+        self.assertEqual(self.install()[0], 0)
+        self.notes.write_text("the plan\n")
+        self.run_in_repo("git", "add", "notes.md")
+        code, output = self.run_in_repo("git", "commit", "-m", "docs: drop Zorblax")
+        self.assertNotEqual(code, 0)
+        self.assertIn("<commit message>:1 term#2", output)
+        # With -v the message file also holds the diff, which removes the term.
+        verbose = ["git", "commit", "-v", "-e", "-m", "docs: drop the old name"]
+        code, output = self.run_in_repo(*verbose)
+        self.assertEqual(code, 0, output)
 
 
 if __name__ == "__main__":
