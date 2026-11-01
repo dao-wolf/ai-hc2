@@ -28,6 +28,7 @@ Before you save, ask: could I say this more shortly?
 - [ ] `make lint` passes, or I could not run it and say so here.
 - [ ] Tests and fixtures use made-up data only (`alice`, `Example Project`, `example.com`).
 - [ ] No real paths, session titles, names, emails or tokens appear in code, docs, tests or this description.
+- [ ] Nothing describes my own set-up: no repository names, results or settings of mine (OS-3).
 - [ ] The PR is small and about one thing, with a conventional commit title.
 - [ ] I updated the docs, or none needed changing.
 

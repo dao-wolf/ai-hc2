@@ -1,6 +1,6 @@
 # Contributing to AI HC2
 
-Thanks for helping. AI HC2 is pre-alpha, so please open an issue to talk through anything bigger than a small fix before you start.
+Thanks for your interest. AI HC2 is pre-alpha, so pull requests are by invitation: only collaborators can open them. Bug reports and ideas are welcome as issues, and security problems go through [SECURITY.md](SECURITY.md). The rules below apply to everyone who changes the repo, including invited contributors and AI agents.
 
 ## Set up
 
@@ -48,7 +48,7 @@ Create your deny-list at `~/.config/ai-hc2/privacy-denylist.txt`, or point `HC2_
 - A term with `/`, `.`, `-` or other characters matches as a substring.
 - The gate prints `file:line term#N`, where N is the term's line number in your deny-list. It never prints the term.
 
-Never copy your deny-list into the repo, an issue or a pull request. Without a deny-list the gate runs only the generic checks and says so. CI uses a repository secret for the maintainers' list, which is not available to pull requests from forks. A maintainer re-runs the gate with the full list before merging.
+Never copy your deny-list into the repo, an issue or a pull request. Without a deny-list the gate runs only the generic checks and says so. This repo's CI runs only the generic checks: deny-lists stay on contributors' own machines, and the full check runs in the pre-commit hook (`make hooks`). The workflow can read a deny-list from the `HC2_PRIVACY_DENYLIST_B64` secret, but this repo doesn't set one. Before merging a pull request, a maintainer runs `make privacy` on its branch with their own list.
 
 ## Made-up fixtures only
 
@@ -57,6 +57,10 @@ Test data and examples must be invented. Never copy a file, a session title, a p
 - Use names such as `alice`, `Example Project` and `/home/alice/example-project`.
 - Use `example.com` for domains and emails.
 - Plant a sentinel string, such as `SENTINEL-TITLE-1`, wherever private data would sit. Privacy tests check that sentinels never appear in output.
+
+## Keep your own context out
+
+AI HC2 is a tool for anyone (OS-3 in the [requirements](docs/requirements.md)). Don't add your own repository names, scan or health results, counts, settings, tool choices or decisions about your set-up to code, docs, examples or tests, even as an illustration. Describe lessons in general terms, and keep your results in your own config and state folders. Add your repository names to your deny-list so the gate catches slips.
 
 ## Pull requests
 

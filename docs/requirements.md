@@ -25,7 +25,7 @@ Deterministic code gathers, analyses and displays the data. LLMs, cloud or local
 
 **Users:**
 - Primary: a developer running many parallel AI sessions across several harnesses.
-- Secondary: open-source users and contributors.
+- Secondary: open-source users. They contribute through issues; pull requests are by invitation.
 
 ## Terms
 
@@ -77,12 +77,13 @@ From the discovery spike on 30 Oct 2026. "Live state" means HC2 can tell whether
 | FR-15 Telemetry | Export the audit trail as OpenTelemetry-compatible JSON lines, and push it over OTLP/HTTP if switched on. Any OTLP credentials are read from an environment variable named in the config; HC2 never stores them. Later: a local OTLP receiver that ingests harness telemetry (Claude Code, Codex), only after the user agrees to the harness config change. |
 | FR-16 Configuration | Discover settings first. Keep the config file in the user's config folder: confidential folders, per-rule switches and thresholds, per-adapter switches and retention. Commit an example config. `hc2 doctor` validates the setup. |
 | FR-17 Plan view | An optional, off-by-default view of a personal plan file: workstreams, decisions and phases. |
+| FR-18 Repository health (optional) | An optional, off-by-default rule pack that scores the user's GitHub repositories and local clones against tracks (Docs, Security, Delivery, Maintenance, Custom) and levels (Bronze, Silver, Gold), plus a Local track for clones that doesn't count towards the level. Checks are deterministic, read-only and defined as data in the user's config. Results are pass, fail, waived, not applicable or unknown; an API error is always unknown. Private repos are counted but not named unless the user opts in. Confidential folders are skipped entirely, with no git command run in them. Results stay local; publishing them is out of scope. PR text is read only to count words and match patterns, then dropped. Design: [research/repo-health.md](research/repo-health.md) and [ADR 0002](adr/0002-how-hc2-reads-repositories.md). |
 
 ## Non-functional requirements
 
 ### Security
 
-- **S-1 Local only.** Every listener binds to 127.0.0.1. Pages are served as `http://localhost:<port>`, because passkeys need a domain name rather than an IP address. Outbound network is opt-in, and only to an allow-list of docs and version hosts. Nothing is sent anywhere by default.
+- **S-1 Local only.** Every listener binds to 127.0.0.1. Pages are served as `http://localhost:<port>`, because passkeys need a domain name rather than an IP address. Outbound network is opt-in, and only to an allow-list of docs and version hosts, plus `api.github.com` and `api.scorecard.dev` while FR-18 is switched on. Nothing is sent anywhere by default.
 - **S-2 Least privilege.**
   - Scanners only read.
   - Executors run only catalogued actions with validated parameters.
@@ -158,7 +159,7 @@ From the discovery spike on 30 Oct 2026. "Live state" means HC2 can tell whether
   - Sessions anywhere whose title or folder contains a configured confidential term (whole words, ignoring case) are masked the same way, under one shared label, so the label never reveals which term matched.
   - Their titles and paths never appear in any surface, log, export or LLM payload.
 - **P-3 Redact at the core.** Redaction happens in the core, before data reaches a surface, a log or an LLM.
-- **P-4 No personal data in the repo.** A privacy gate in pre-commit and CI checks every change against a personal deny-list that is kept outside the repo.
+- **P-4 No personal data in the repo.** A privacy gate checks every change: in pre-commit against a personal deny-list kept outside the repo, and in CI with the generic checks only (emails, home paths and secret formats).
 
 ### Determinism
 
@@ -234,6 +235,7 @@ From the discovery spike on 30 Oct 2026. "Live state" means HC2 can tell whether
 
 - **OS-1 Licence and project files.** Licensed under Apache-2.0, with README, CONTRIBUTING, SECURITY and CODE_OF_CONDUCT files.
 - **OS-2 Clean history.** History started clean, with no personal data in the repo.
+- **OS-3 A tool, not anyone's records.** HC2 is a general tool for anyone to use. The repo holds the tool and its design only: never a user's context, such as their repository names, health or scan results, counts, samples, settings, tool choices, or decisions about their own set-up. Examples, fixtures and docs use made-up data. A user's own results and config stay in their config and state folders.
 
 ## Acceptance
 
