@@ -6,7 +6,7 @@ Proposal, 31 Oct 2026. Nothing is built yet. It extends S-7 and FR-6 in [require
 
 Instruction files steer every agent session: CLAUDE.md and AGENTS.md at user, folder and project level, skills, hooks and harness settings. Most of them live outside any git repository. When one changes, nothing records who changed it, when, why, or who approved it.
 
-On 31 Oct 2026 a maintainer found a changed CLAUDE.md and could trace it to the session that made it only by searching session transcripts.
+Without such a record, tracing a changed instruction file back to the session that made it means searching session transcripts.
 
 ## Goals
 
