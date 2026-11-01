@@ -9,7 +9,7 @@ You need Python 3.11 or later and git. Nothing else is needed to run or test HC2
 ```sh
 git clone <this-repo-url> ai-hc2
 cd ai-hc2
-make hooks    # installs the privacy-gate pre-commit hook
+make hooks    # installs the privacy-gate git hooks
 make check    # tests, byte-compile and privacy gate
 ```
 
@@ -42,13 +42,15 @@ This repo is public, so personal data must never reach it. `scripts/privacy_gate
 - absolute home paths such as `/Users/<name>/` or `/home/<name>/`;
 - common secret formats, such as AWS key ids, GitHub tokens and private key headers.
 
+`make hooks` installs two git hooks that run the gate. The pre-commit hook scans the staged copy of each file, which is what the commit will hold, and the name and email git will put on the commit. The commit-msg hook scans the commit message, leaving out the diff that `git commit -v` adds below it. `make check` and `make privacy` scan the files on disk instead.
+
 Create your deny-list at `~/.config/ai-hc2/privacy-denylist.txt`, or point `HC2_PRIVACY_DENYLIST` at another file. Put one term per line. Lines starting with `#` and blank lines are ignored. List the names of people, employers, clients, private projects and anything else that must not appear in public.
 
 - A term made of letters, digits and spaces matches whole words, ignoring case. "Sam" does not match "sample".
 - A term with `/`, `.`, `-` or other characters matches as a substring.
 - The gate prints `file:line term#N`, where N is the term's line number in your deny-list. It never prints the term.
 
-Never copy your deny-list into the repo, an issue or a pull request. Without a deny-list the gate runs only the generic checks and says so. This repo's CI runs only the generic checks: deny-lists stay on contributors' own machines, and the full check runs in the pre-commit hook (`make hooks`). The workflow can read a deny-list from the `HC2_PRIVACY_DENYLIST_B64` secret, but this repo doesn't set one. Before merging a pull request, a maintainer runs `make privacy` on its branch with their own list.
+Never copy your deny-list into the repo, an issue or a pull request. Without a deny-list the gate runs only the generic checks and says so. This repo's CI runs only the generic checks: deny-lists stay on contributors' own machines, and the full check runs in the git hooks (`make hooks`). The workflow can read a deny-list from the `HC2_PRIVACY_DENYLIST_B64` secret, but this repo doesn't set one. Before merging a pull request, a maintainer runs `make privacy` on its branch with their own list.
 
 ## Made-up fixtures only
 
