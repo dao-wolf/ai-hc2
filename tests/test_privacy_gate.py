@@ -85,6 +85,39 @@ class TermMatchingTests(unittest.TestCase):
         self.assertEqual(labels("quentin   example", generic=False), ["term#6"])
         self.assertEqual(labels("Quentin Examples", generic=False), [])
 
+    def test_space_hyphen_and_underscore_are_one_separator(self) -> None:
+        terms = gate.parse_terms("example-project\nExample Person\n")
+        for text, label in [
+            ("Example Project", "term#1"),
+            ("example_project", "term#1"),
+            ("xexample-projectx", "term#1"),
+            ("example-person", "term#2"),
+            ("Example_Person", "term#2"),
+            ("example - person", "term#2"),
+        ]:
+            with self.subTest(text=text):
+                found = gate.scan_text("f", text, terms)
+                self.assertEqual([h.label for h in found], [label])
+
+    def test_a_term_wrapped_onto_the_next_line_is_reported_where_it_starts(
+        self,
+    ) -> None:
+        terms = gate.parse_terms(DENYLIST)
+        text = "ok\nsigned, Quentin\n  Example\nsee acme-\nsecret/x\n"
+        hits = gate.scan_text("a.md", text, terms)
+        found = [(h.line, h.label) for h in hits]
+        self.assertEqual(found, [(2, "term#6"), (4, "term#4")])
+
+    def test_a_wrapped_match_does_not_hide_one_on_the_next_line(self) -> None:
+        terms = gate.parse_terms("Ab Ab\n")
+        hits = gate.scan_text("f", "Ab\nAb Ab\n", terms)
+        self.assertEqual([h.line for h in hits], [1, 2])
+
+    def test_a_separator_at_either_end_of_a_term_stays_literal(self) -> None:
+        terms = gate.parse_terms("-zz\nyy_\n")
+        self.assertEqual(len(gate.scan_text("f", "x-zz yy_x", terms)), 2)
+        self.assertEqual(gate.scan_text("f", "x zz yy-x", terms), [])
+
     def test_line_numbers_are_reported(self) -> None:
         terms = gate.parse_terms(DENYLIST)
         hits = gate.scan_text("a.md", "ok\nok\nzorblax\n", terms)
