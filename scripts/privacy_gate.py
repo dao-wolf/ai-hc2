@@ -14,7 +14,10 @@ only a commit message file. Two sets of checks run:
 
 Matching is case-insensitive. A term made only of letters, digits and spaces
 matches whole words, so "Sam" does not match "sample". A term with any
-other character (/ . - and so on) matches as a substring.
+other character (/ . - and so on) matches as a substring. In both, a space,
+hyphen or underscore between words matches any run of them, line breaks
+included, so "Example Person" also matches "example-person". A hit is reported
+on the line where the match starts.
 
 Output is one line per hit: `file:line term#N`. N is the term's line number in
 the deny-list file. The term itself is never printed, and neither is the text
@@ -31,13 +34,17 @@ import os
 import re
 import subprocess
 import sys
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 ENV_DENYLIST = "HC2_PRIVACY_DENYLIST"
 DEFAULT_DENYLIST = "~/.config/ai-hc2/privacy-denylist.txt"
 MAX_BYTES = 5_000_000
+SEPARATORS = r"[\s_-]+"
+# Only a separator between two other characters is loosened. A loose one at the
+# start of a term would make the search slow on a long run of hyphens.
+BETWEEN_WORDS_RE = re.compile(rf"(?<=[^\s_-]){SEPARATORS}(?=[^\s_-])")
 
 EMAIL_RE = re.compile(
     r"[A-Za-z0-9._%+-]+@([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,})"
@@ -103,12 +110,17 @@ class Term:
 
 
 def compile_term(term: str) -> re.Pattern[str]:
-    """Whole-word match for letters, digits and spaces; substring otherwise."""
+    """Whole-word match for letters, digits and spaces; substring otherwise.
+
+    Each run of spaces, hyphens or underscores between the term's words matches
+    any such run in the text, line breaks included.
+    """
+    parts = BETWEEN_WORDS_RE.split(term)
+    body = SEPARATORS.join(re.escape(part) for part in parts)
     if all(ch.isalnum() or ch == " " for ch in term):
-        body = r"\s+".join(re.escape(word) for word in term.split())
         # [^\W_] is "a letter or digit", so an underscore counts as a separator.
         return re.compile(rf"(?<![^\W_]){body}(?![^\W_])", re.IGNORECASE)
-    return re.compile(re.escape(term), re.IGNORECASE)
+    return re.compile(body, re.IGNORECASE)
 
 
 def parse_terms(text: str) -> list[Term]:
@@ -149,16 +161,33 @@ def generic_labels(line: str) -> list[str]:
     return labels
 
 
+def match_lines(pattern: re.Pattern[str], text: str) -> Iterator[int]:
+    """Yield each line where a match starts. A match may run onto later lines.
+
+    After a match the search goes on from the next line, so a match that wraps
+    never hides one that starts on the line below.
+    """
+    start, line = 0, 1
+    while match := pattern.search(text, start):
+        line += text.count("\n", start, match.start())
+        yield line
+        start = text.find("\n", match.start()) + 1
+        if not start:
+            return
+        line += 1
+
+
 def scan_text(
     path: str, text: str, terms: Sequence[Term], generic: bool = True
 ) -> list[Hit]:
     """Scan one file's text. Each (line, label) pair is reported once."""
-    hits: set[Hit] = set()
-    for number, line in enumerate(text.split("\n"), start=1):
-        for term in terms:
-            if term.pattern.search(line):
-                hits.add(Hit(path, number, f"term#{term.number}"))
-        if generic:
+    hits = {
+        Hit(path, line, f"term#{term.number}")
+        for term in terms
+        for line in match_lines(term.pattern, text)
+    }
+    if generic:
+        for number, line in enumerate(text.split("\n"), start=1):
             hits.update(Hit(path, number, label) for label in generic_labels(line))
     return sorted(hits)
 
