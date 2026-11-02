@@ -34,6 +34,10 @@ dev = [
     "mypy>=1.13",
     "ruff>=0.8",
 ]
+# Only for `make mutation`. Kept out of `dev` so CI does not install it.
+mutation = [
+    "mutmut>=3.8",
+]
 
 [project.scripts]
 hc2 = "hc2.cli:main"
@@ -59,6 +63,13 @@ select = ["E", "F", "W", "I", "B", "UP", "SIM"]
 python_version = "3.11"
 strict = true
 files = ["src"]
+
+[tool.mutmut]
+source_paths = ["scripts/privacy_gate.py"]
+pytest_add_cli_args_test_selection = ["tests/test_privacy_gate.py"]
+also_copy = ["scripts/install-hooks.sh"]
+# The hook tests start the script from a temporary repo, where mutmut can't find its config.
+pytest_add_cli_args = ["--deselect", "tests/test_privacy_gate.py::HookTests"]
 
 [tool.coverage.run]
 source = ["hc2"]
