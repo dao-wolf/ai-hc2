@@ -336,35 +336,46 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Iterable[str] | None = None) -> int:
-    args = build_parser().parse_args(None if argv is None else list(argv))
-    terms: list[Term] = []
+def load_terms(args: argparse.Namespace) -> list[Term] | None:
+    """Load the deny-list the options ask for. None means a required one is missing."""
     if args.generic_only:
         note = "privacy gate: generic checks only (deny-list skipped)."
         print(note, file=sys.stderr)
-    else:
-        path = resolve_denylist(args.denylist)
-        if path.is_file():
-            terms = load_denylist(path)
-            note = f"privacy gate: {len(terms)} deny-list terms loaded."
-            print(note, file=sys.stderr)
-        elif args.require_denylist:
-            print("privacy gate: deny-list file not found.", file=sys.stderr)
-            return 2
-        else:
-            print(
-                "privacy gate: NOTICE deny-list file not found, "
-                "running generic checks only.",
-                file=sys.stderr,
-            )
+        return []
+    path = resolve_denylist(args.denylist)
+    if path.is_file():
+        terms = load_denylist(path)
+        note = f"privacy gate: {len(terms)} deny-list terms loaded."
+        print(note, file=sys.stderr)
+        return terms
+    if args.require_denylist:
+        print("privacy gate: deny-list file not found.", file=sys.stderr)
+        return None
+    print(
+        "privacy gate: NOTICE deny-list file not found, running generic checks only.",
+        file=sys.stderr,
+    )
+    return []
+
+
+def scan_source(
+    args: argparse.Namespace, terms: Sequence[Term]
+) -> tuple[list[Hit], str]:
+    """Scan what the options name. Returns the hits and a summary for the log."""
+    if args.message:
+        return scan_message(args.message, terms), "scanned the commit message"
+    scan = scan_index if args.staged else scan_tree
+    hits, scanned, skipped = scan(args.root, terms)
+    return hits, f"scanned {scanned} files, skipped {skipped}"
+
+
+def main(argv: Iterable[str] | None = None) -> int:
+    args = build_parser().parse_args(None if argv is None else list(argv))
+    terms = load_terms(args)
+    if terms is None:
+        return 2
     try:
-        if args.message:
-            hits = scan_message(args.message, terms)
-            summary = "scanned the commit message"
-        else:
-            scan = scan_index if args.staged else scan_tree
-            hits, scanned, skipped = scan(args.root, terms)
-            summary = f"scanned {scanned} files, skipped {skipped}"
+        hits, summary = scan_source(args, terms)
     except (OSError, subprocess.CalledProcessError):
         print("privacy gate: could not read what it had to scan.", file=sys.stderr)
         return 2
