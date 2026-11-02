@@ -74,7 +74,7 @@ Example, with made-up values:
 Approved: "add" (session 0000-example, 2026-10-31 20:50 UTC)
 ```
 
-A fact ledger can hold these as claims with sources later.
+A claims register could hold these later, each with its source.
 
 ## Which files
 
