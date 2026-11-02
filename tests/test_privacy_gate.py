@@ -26,7 +26,8 @@ HOME = "/home/"
 
 
 def load_gate() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("privacy_gate", SCRIPT)
+    # The dotted name is the one mutmut gives the module, so it can match its mutants.
+    spec = importlib.util.spec_from_file_location("scripts.privacy_gate", SCRIPT)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module

@@ -59,7 +59,7 @@ A parallel lane that touches nothing in S3 or S4 until R3. The design is in [res
   | Swift | Mac app models |
 
 - **Live checks.** On the maintainer's Mac, read-only and printing counts only. These are never part of CI.
-- **Mutation testing.** Rule packs, from S3 on.
+- **Mutation testing.** The privacy gate now, with `make mutation`. Rule packs, from S3 on.
 - **Running tests locally.**
   - The standard-library test runner, so contributors need only Python 3.11 or later.
   - CI adds ruff, mypy and coverage.

@@ -32,6 +32,7 @@ PYTHONPATH=src python3 -m unittest discover -s tests
 - CI also runs `coverage`. The core needs at least 85% coverage.
 - Every adapter and rule gets a test. Rules get golden tests.
 - Tests must never read or write your real config or state folders. Point `HC2_CONFIG_DIR` and `HC2_STATE_DIR` at a temporary folder.
+- `make mutation` checks that the privacy gate's tests can fail. It changes one thing in a copy of `scripts/privacy_gate.py` at a time and runs the gate's tests, and a change that no test catches is a gap. Install it with `pip install -e ".[mutation]"`. It needs pytest, which the extra installs, and only for this check. It needs `fork` (POSIX; WSL on Windows). It is not part of CI.
 
 ## The privacy gate
 
