@@ -1,0 +1,10 @@
+# Mutation testing for the privacy gate. Run it only through `make mutation`:
+# cosmic-ray edits files in place, and the target runs it on a copy.
+[cosmic-ray]
+module-path = "scripts/privacy_gate.py"
+timeout = 10.0
+excluded-modules = []
+test-command = "python3 -m unittest discover -s tests -p test_privacy_gate.py"
+
+[cosmic-ray.distributor]
+name = "local"

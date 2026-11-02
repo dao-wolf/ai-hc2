@@ -11,6 +11,7 @@ dist/
 .coverage
 .coverage.*
 htmlcov/
+.mutation/
 
 # Editors and OS
 .DS_Store

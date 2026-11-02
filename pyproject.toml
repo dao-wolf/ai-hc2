@@ -34,6 +34,10 @@ dev = [
     "mypy>=1.13",
     "ruff>=0.8",
 ]
+# Only for `make mutation`. Kept out of `dev` so CI does not install it.
+mutation = [
+    "cosmic-ray>=8.7",
+]
 
 [project.scripts]
 hc2 = "hc2.cli:main"
