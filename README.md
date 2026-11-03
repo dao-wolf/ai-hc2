@@ -15,6 +15,24 @@ AI HC2 (AI Harness Command Center) is one local place to see and steer every AI 
 3. **Metadata only.** HC2 never reads conversation content. Confidential folders are masked, and secrets are redacted before data leaves the core.
 4. **Propose, then a human approves.** Rules, LLMs and people can propose actions. Only a person approves them. Every step is logged.
 
+## Architecture
+
+Three [C4](https://c4model.com) views of version 0.0.1. Solid boxes exist today. Dashed boxes are planned, labelled with the [slice](docs/slices.md) that delivers them. Dotted lines mark a boundary.
+
+**System context:** who uses HC2, and what it reads and talks to.
+
+![C4 level 1: AI HC2 in its context](docs/architecture/c4-1-system-context.svg)
+
+**Containers:** the parts that run, and the local files they share.
+
+![C4 level 2: the containers of AI HC2](docs/architecture/c4-2-containers.svg)
+
+**Components:** inside the `hc2` package. Each harness plugs in through one interface, the `Adapter` protocol. The process and system readers plug in through another, the `Collector` function. The rules are pure functions from collected facts to findings.
+
+![C4 level 3: the components of the hc2 package](docs/architecture/c4-3-components.svg)
+
+Each image has an editable `.excalidraw` source beside it in [docs/architecture](docs/architecture). Open it at [excalidraw.com](https://excalidraw.com), and export a new SVG when you change it.
+
 ## Quick start
 
 You need Python 3.11 or later. HC2 has no runtime dependencies.
