@@ -57,6 +57,11 @@ class TermMatchingTests(unittest.TestCase):
         terms = gate.parse_terms(DENYLIST)
         self.assertEqual([t.number for t in terms], [2, 4, 5, 6])
 
+    def test_a_first_term_that_starts_with_x_still_matches(self) -> None:
+        terms = gate.parse_terms("Xample Person\nZorblax\n")
+        self.assertEqual([t.number for t in terms], [1, 2])
+        self.assertTrue(terms[0].pattern.search("thank Xample Person for the review"))
+
     def test_words_match_whole_words_only(self) -> None:
         self.assertEqual(labels("a Zorblax here", generic=False), ["term#2"])
         self.assertEqual(labels("ZORBLAX", generic=False), ["term#2"])
@@ -161,7 +166,7 @@ class GenericCheckTests(unittest.TestCase):
             f"alice{AT}github.com",
             f"zed{AT}github.com",
             f"git{AT}gitlab.com",
-            f"git{AT}aaa.org",
+            f"git{AT}example.org",
         ]:
             with self.subTest(text=text):
                 self.assertEqual(labels(text), ["email"])
@@ -278,11 +283,11 @@ class ScanFilesTests(unittest.TestCase):
     def test_a_file_over_5_million_bytes_is_skipped_and_the_rest_are_scanned(
         self,
     ) -> None:
-        files = {"a.txt": b"zorblax\n", "b.txt": b"ok\nzorblax\n"}
-        sizes = {"a.txt": 5_000_001, "b.txt": 11}
+        files = {"a.txt": b"zorblax\n", "b.txt": b"ok\nzorblax\n", "c.txt": b"zorblax"}
+        sizes = {"a.txt": 5_000_001, "b.txt": 11, "c.txt": 5_000_001}
         hits, scanned, skipped, err = self.scan(files, sizes)
         self.assertEqual(hits, [("b.txt", 2)])
-        self.assertEqual((scanned, skipped), (1, 1))
+        self.assertEqual((scanned, skipped), (1, 2))
         self.assertIn("a.txt", err)
 
     def test_a_file_of_exactly_5_million_bytes_is_scanned(self) -> None:
@@ -294,10 +299,11 @@ class ScanFilesTests(unittest.TestCase):
     def test_only_a_nul_in_the_first_8192_bytes_makes_a_file_binary(self) -> None:
         files = {
             "in.txt": b"x" * 8191 + b"\0 zorblax",
+            "in2.txt": b"\0 zorblax",
             "out.txt": b"x" * 8192 + b"\0 zorblax",
         }
         hits, scanned, skipped, _ = self.scan(files)
-        self.assertEqual((hits, scanned, skipped), ([("out.txt", 1)], 1, 1))
+        self.assertEqual((hits, scanned, skipped), ([("out.txt", 1)], 1, 2))
 
     def test_bytes_that_are_not_utf8_do_not_stop_the_scan(self) -> None:
         hits, scanned, _, _ = self.scan({"a.txt": b"caf\xe9 zorblax\n"})
@@ -362,6 +368,21 @@ class IdentityTests(unittest.TestCase):
         noreply = "1+example-handle" + AT + "users.noreply.github.com"
         self.assertEqual(self.scan("example-handle", noreply), [])
 
+    def test_a_failed_author_lookup_does_not_skip_the_committer(self) -> None:
+        terms = gate.parse_terms(DENYLIST)
+        ident = b"Quentin Example <1+q" + AT.encode() + b"users.noreply.github.com>"
+        committer = subprocess.CompletedProcess(
+            [], 0, stdout=ident + b" 1700000000 +0000"
+        )
+        for failure in [subprocess.CalledProcessError(128, "git"), OSError()]:
+            with self.subTest(failure=type(failure).__name__):
+                with mock.patch.object(
+                    gate.subprocess, "run", side_effect=[failure, committer]
+                ):
+                    hits = gate.scan_identity(Path("."), terms)
+                found = [(h.path, h.line, h.label) for h in hits]
+                self.assertEqual(found, [("<git committer>", 1, "term#6")])
+
 
 class CommandLineTests(unittest.TestCase):
     def run_gate(
@@ -390,6 +411,7 @@ class CommandLineTests(unittest.TestCase):
             args = ("--root", str(root), "--denylist", str(deny))
             code, out, err = self.run_gate(*args)
         self.assertEqual((code, out), (0, ""))
+        self.assertIn("4 deny-list terms loaded", err)
         self.assertIn("0 hits", err)
 
     def test_hit_exits_1_and_never_prints_the_term(self) -> None:
@@ -432,10 +454,11 @@ class CommandLineTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root, _ = self.setup_repo(tmp, "x\n")
             missing = str(Path(tmp) / "nope.txt")
-            code, _, _ = self.run_gate(
+            code, out, err = self.run_gate(
                 "--root", str(root), "--denylist", missing, "--require-denylist"
             )
-        self.assertEqual(code, 2)
+        self.assertEqual((code, out), (2, ""))
+        self.assertIn("not found", err)
 
     def test_generic_only_ignores_the_denylist(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -490,8 +513,19 @@ class CommandLineTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root, deny = self.setup_repo(tmp, "x\n")
             args = ("--root", str(root), "--denylist", str(deny), "--staged")
-            code, _, _ = self.run_gate(*args, env={"GIT_CEILING_DIRECTORIES": tmp})
-        self.assertEqual(code, 2)
+            code, out, err = self.run_gate(*args, env={"GIT_CEILING_DIRECTORIES": tmp})
+        self.assertEqual((code, out), (2, ""))
+        self.assertIn("could not read", err)
+
+    def test_staged_with_a_broken_index_exits_2(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root, deny = self.setup_repo(tmp, f"jane{AT}corp.org\n")
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            subprocess.run(["git", "-C", str(root), "add", "notes.md"], check=True)
+            (root / ".git" / "index").write_bytes(b"garbage")
+            args = ("--root", str(root), "--denylist", str(deny), "--staged")
+            code, out, _ = self.run_gate(*args)
+        self.assertEqual((code, out), (2, ""))
 
     def test_message_scans_only_the_commit_message(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -513,6 +547,58 @@ class CommandLineTests(unittest.TestCase):
             args = ("--root", str(root), "--denylist", str(deny))
             code, out, _ = self.run_gate(*args, "--message", str(message))
         self.assertEqual((code, out), (1, "<commit message>:1 term#6\n"))
+
+    def test_a_non_ascii_term_is_caught_under_a_non_utf8_locale(self) -> None:
+        term = "Exämple Person"
+        locale = {"LC_ALL": "C", "PYTHONUTF8": "0", "PYTHONCOERCECLOCALE": "0"}
+        with tempfile.TemporaryDirectory() as tmp:
+            deny = Path(tmp) / "denylist.txt"
+            deny.write_text(f"{term}\n", encoding="utf-8")
+            message = Path(tmp) / "COMMIT_EDITMSG"
+            message.write_text(f"docs: thank {term}\n", encoding="utf-8")
+            command = [sys.executable, str(SCRIPT), "--denylist", str(deny)]
+            command += ["--message", str(message)]
+            done = subprocess.run(
+                command, capture_output=True, text=True, env=os.environ | locale
+            )
+        self.assertEqual(
+            (done.returncode, done.stdout), (1, "<commit message>:1 term#1\n")
+        )
+
+    def test_files_are_read_as_utf8_whatever_the_default_encoding(self) -> None:
+        # Some mutation tools cannot see a mutant in a subprocess, so this models
+        # the test above in-process: a default encoding that is not UTF-8.
+        term = "Exämple Person"
+        read_bytes = Path.read_bytes
+
+        def read_text(
+            path: Path, encoding: str | None = None, errors: str | None = None
+        ):
+            return read_bytes(path).decode(encoding or "ascii", errors or "strict")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            deny, message = Path(tmp) / "denylist.txt", Path(tmp) / "COMMIT_EDITMSG"
+            deny.write_bytes(f"{term}\n".encode())
+            message.write_bytes(f"docs: thank {term}\n".encode())
+            with mock.patch.object(Path, "read_text", read_text):
+                hits = gate.scan_message(message, gate.load_denylist(deny))
+        self.assertEqual([(h.path, h.line) for h in hits], [("<commit message>", 1)])
+
+    def test_main_reads_the_command_line_when_given_no_arguments(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root, _ = self.setup_repo(tmp, f"jane{AT}corp.org\n")
+            argv = ["privacy_gate.py", "--root", str(root), "--generic-only"]
+            out = io.StringIO()
+            with (
+                mock.patch.object(sys, "argv", argv),
+                contextlib.redirect_stdout(out),
+                contextlib.redirect_stderr(io.StringIO()),
+            ):
+                code = gate.main()
+        self.assertEqual((code, out.getvalue()), (1, "notes.md:1 email\n"))
+
+    def test_the_default_root_is_the_repo_the_script_lives_in(self) -> None:
+        self.assertEqual(gate.build_parser().parse_args([]).root, SCRIPT.parent.parent)
 
     def test_default_denylist_path_when_the_variable_is_unset(self) -> None:
         env = {k: v for k, v in os.environ.items() if k != "HC2_PRIVACY_DENYLIST"}
