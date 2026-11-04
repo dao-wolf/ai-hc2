@@ -51,6 +51,7 @@ Create your deny-list at `~/.config/ai-hc2/privacy-denylist.txt`, or point `HC2_
 - A term with `/`, `.`, `-` or other characters matches as a substring.
 - In both kinds, a space, hyphen or underscore between words matches any run of them, even across a line break. So "Example Person" also matches "example-person" and a name wrapped onto the next line. The hit is reported on the line where the match starts.
 - The gate prints `file:line term#N`, where N is the term's line number in your deny-list. It never prints the term.
+- Exit code 0 means clean, 1 means hits, and 2 means the gate could not run: any failure at all, such as an unreadable deny-list or a damaged staged file, exits 2. A scan that finished always ends with a summary line, `privacy gate: scanned ..., N hits.` If your script or hook never saw that line, treat the run as failed. A required deny-list (`--require-denylist`) that holds no terms also exits 2.
 
 Never copy your deny-list into the repo, an issue or a pull request. Without a deny-list the gate runs only the generic checks and says so. This repo's CI runs only the generic checks: deny-lists stay on contributors' own machines, and the full check runs in the git hooks (`make hooks`). The workflow can read a deny-list from the `HC2_PRIVACY_DENYLIST_B64` secret, but this repo doesn't set one. Before merging a pull request, a maintainer runs `make privacy` on its branch with their own list.
 
