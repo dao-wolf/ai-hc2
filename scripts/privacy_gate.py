@@ -23,7 +23,10 @@ Output is one line per hit: `file:line term#N`. N is the term's line number in
 the deny-list file. The term itself is never printed, and neither is the text
 matched by a generic check. Line 0 means the file's name matched.
 
-Exit codes: 0 clean, 1 hits found, 2 the gate could not run.
+Exit codes: 0 clean, 1 hits found, 2 the gate could not run. Any failure, of
+any kind, exits 2. Exit 0 and 1 happen only after the scan finished, and a
+finished scan ends with a summary line on stderr: `privacy gate: scanned ...,
+N hits.` A run that exits 2 never prints that line.
 Standard library only.
 """
 
@@ -87,6 +90,10 @@ SECRET_PATTERNS = (
 # drops it from the message. The gate drops it too, or the diff of a commit
 # that removes a leak would block that commit.
 SCISSORS_RE = re.compile(r"^\S+ -{24} >8 -{24}$", re.MULTILINE)
+
+
+class ScanError(Exception):
+    """The gate can't tell what it was asked to scan. The text is safe to print."""
 
 
 @dataclass(frozen=True, order=True)
@@ -222,7 +229,6 @@ def scan_files(
     sizes: dict[str, int],
     read: Callable[[str], bytes],
     terms: Sequence[Term],
-    generic: bool = True,
 ) -> tuple[list[Hit], int, int]:
     """Scan files by name. Returns the hits, files scanned and files skipped."""
     hits: list[Hit] = []
@@ -239,23 +245,22 @@ def scan_files(
             skipped += 1
             continue
         scanned += 1
-        hits.extend(scan_text(name, data.decode("utf-8", "replace"), terms, generic))
+        hits.extend(scan_text(name, data.decode("utf-8", "replace"), terms))
     return sorted(set(hits)), scanned, skipped
 
 
-def scan_tree(
-    root: Path, terms: Sequence[Term], generic: bool = True
-) -> tuple[list[Hit], int, int]:
+def scan_tree(root: Path, terms: Sequence[Term]) -> tuple[list[Hit], int, int]:
     """Scan a folder's files as they are on disk."""
     sizes = {name: (root / name).stat().st_size for name in list_files(root)}
-    return scan_files(sizes, lambda name: (root / name).read_bytes(), terms, generic)
+    return scan_files(sizes, lambda name: (root / name).read_bytes(), terms)
 
 
 def staged_files(root: Path) -> dict[str, bytes]:
     """The staged copy of every file in git's index, by path.
 
     A link's copy is the target path it stores. Submodules are skipped. Raises
-    OSError or CalledProcessError when git or the index can't be read.
+    OSError or CalledProcessError when git or the index can't be read, and
+    ScanError when an object is missing or git's answer is cut short.
     """
     command = ["git", "-C", str(root), "ls-files", "--stage", "-z"]
     listing = subprocess.run(command, capture_output=True, check=True).stdout
@@ -272,20 +277,25 @@ def staged_files(root: Path) -> dict[str, bytes]:
     at = 0
     for name, _ in entries:
         # Each object comes back as "<id> <type> <size>\n<content>\n".
-        start = out.index(b"\n", at) + 1
-        size = int(out[at:start].split()[2])
+        start = out.find(b"\n", at) + 1
+        header = out[at:start].split()
+        if not start or len(header) != 3 or not header[2].isdigit():
+            raise ScanError("privacy gate: a staged object is missing or unreadable.")
+        size = int(header[2])
+        if start + size > len(out):
+            raise ScanError(
+                "privacy gate: git's answer for a staged object was cut short."
+            )
         files[name] = out[start : start + size]
         at = start + size + 1
     return files
 
 
-def scan_index(
-    root: Path, terms: Sequence[Term], generic: bool = True
-) -> tuple[list[Hit], int, int]:
+def scan_index(root: Path, terms: Sequence[Term]) -> tuple[list[Hit], int, int]:
     """Scan what the next commit will hold, leaving out unstaged edits."""
     files = staged_files(root)
     sizes = {name: len(data) for name, data in files.items()}
-    return scan_files(sizes, files.__getitem__, terms, generic)
+    return scan_files(sizes, files.__getitem__, terms)
 
 
 def scan_message(path: Path, terms: Sequence[Term]) -> list[Hit]:
@@ -376,6 +386,9 @@ def load_terms(args: argparse.Namespace) -> list[Term] | None:
         terms = load_denylist(path)
         note = f"privacy gate: {len(terms)} deny-list terms loaded."
         print(note, file=sys.stderr)
+        if args.require_denylist and not terms:
+            print("privacy gate: the deny-list has no terms.", file=sys.stderr)
+            return None
         return terms
     if args.require_denylist:
         print("privacy gate: deny-list file not found.", file=sys.stderr)
@@ -398,22 +411,33 @@ def scan_source(
     return hits, f"scanned {scanned} files, skipped {skipped}"
 
 
-def main(argv: Iterable[str] | None = None) -> int:
-    args = build_parser().parse_args(None if argv is None else list(argv))
+def run(args: argparse.Namespace) -> int:
+    """Scan what the options name. Anything that goes wrong raises."""
     terms = load_terms(args)
     if terms is None:
         return 2
-    try:
-        hits, summary = scan_source(args, terms)
-    except (OSError, subprocess.CalledProcessError):
-        print("privacy gate: could not read what it had to scan.", file=sys.stderr)
-        return 2
+    hits, summary = scan_source(args, terms)
     if args.check_identity:
         hits = sorted(set(hits) | set(scan_identity(args.root, terms)))
     for hit in hits:
         print(hit)
     print(f"privacy gate: {summary}, {len(hits)} hits.", file=sys.stderr)
     return 1 if hits else 0
+
+
+def main(argv: Iterable[str] | None = None) -> int:
+    args = build_parser().parse_args(None if argv is None else list(argv))
+    try:
+        return run(args)
+    except ScanError as error:
+        print(error, file=sys.stderr)
+    except (OSError, subprocess.CalledProcessError):
+        print("privacy gate: could not read what it had to scan.", file=sys.stderr)
+    except Exception as error:
+        # Only the class name is printed: the text of an error may quote a
+        # deny-list term or a line of a scanned file.
+        print(f"privacy gate: FAILED ({type(error).__name__}).", file=sys.stderr)
+    return 2
 
 
 if __name__ == "__main__":
