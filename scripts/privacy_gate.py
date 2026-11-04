@@ -91,6 +91,9 @@ SECRET_PATTERNS = (
 # that removes a leak would block that commit.
 SCISSORS_RE = re.compile(r"^\S+ -{24} >8 -{24}$", re.MULTILINE)
 
+# The first line git prints for an object read with `cat-file --batch`.
+OBJECT_HEADER_RE = re.compile(rb"[0-9a-f]+ [a-z]+ ([0-9]+)\n")
+
 
 class ScanError(Exception):
     """The gate can't tell what it was asked to scan. The text is safe to print."""
@@ -255,13 +258,8 @@ def scan_tree(root: Path, terms: Sequence[Term]) -> tuple[list[Hit], int, int]:
     return scan_files(sizes, lambda name: (root / name).read_bytes(), terms)
 
 
-def staged_files(root: Path) -> dict[str, bytes]:
-    """The staged copy of every file in git's index, by path.
-
-    A link's copy is the target path it stores. Submodules are skipped. Raises
-    OSError or CalledProcessError when git or the index can't be read, and
-    ScanError when an object is missing or git's answer is cut short.
-    """
+def staged_entries(root: Path) -> list[tuple[str, bytes]]:
+    """The path and object id of every staged file. Submodules are skipped."""
     command = ["git", "-C", str(root), "ls-files", "--stage", "-z"]
     listing = subprocess.run(command, capture_output=True, check=True).stdout
     entries: list[tuple[str, bytes]] = []
@@ -270,24 +268,39 @@ def staged_files(root: Path) -> dict[str, bytes]:
         mode, object_id, _stage = info.split()
         if mode != b"160000":
             entries.append((name.decode("utf-8", "replace"), object_id))
+    return entries
+
+
+def read_object(out: bytes, at: int) -> tuple[bytes, int]:
+    """Cut one object from `git cat-file --batch` output. Returns it and where
+    the next one starts. Each comes back as "<id> <type> <size>\n<content>\n";
+    a missing one is "<id> missing\n", which doesn't match.
+    """
+    header = OBJECT_HEADER_RE.match(out, at)
+    if header is None:
+        raise ScanError("privacy gate: a staged object is missing or unreadable.")
+    start = header.end()
+    end = start + int(header.group(1))
+    if end > len(out):
+        raise ScanError("privacy gate: git's answer for a staged object was cut short.")
+    return out[start:end], end + 1
+
+
+def staged_files(root: Path) -> dict[str, bytes]:
+    """The staged copy of every file in git's index, by path.
+
+    A link's copy is the target path it stores. Raises OSError or
+    CalledProcessError when git or the index can't be read, and ScanError when
+    an object is missing or git's answer is cut short.
+    """
+    entries = staged_entries(root)
     command = ["git", "-C", str(root), "cat-file", "--batch"]
     ids = b"".join(object_id + b"\n" for _, object_id in entries)
     out = subprocess.run(command, input=ids, capture_output=True, check=True).stdout
     files: dict[str, bytes] = {}
     at = 0
     for name, _ in entries:
-        # Each object comes back as "<id> <type> <size>\n<content>\n".
-        start = out.find(b"\n", at) + 1
-        header = out[at:start].split()
-        if not start or len(header) != 3 or not header[2].isdigit():
-            raise ScanError("privacy gate: a staged object is missing or unreadable.")
-        size = int(header[2])
-        if start + size > len(out):
-            raise ScanError(
-                "privacy gate: git's answer for a staged object was cut short."
-            )
-        files[name] = out[start : start + size]
-        at = start + size + 1
+        files[name], at = read_object(out, at)
     return files
 
 
