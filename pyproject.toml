@@ -66,12 +66,17 @@ files = ["src"]
 
 [tool.mutmut]
 source_paths = ["scripts/privacy_gate.py"]
+# Kept by hand: add each new tests/test_privacy_gate_*.py file here, except
+# test_privacy_gate_hooks.py, which runs real hooks (see the deselect below).
 pytest_add_cli_args_test_selection = [
     "tests/test_privacy_gate.py",
     "tests/test_privacy_gate_defaults.py",
     "tests/test_privacy_gate_encoding.py",
+    "tests/test_privacy_gate_exit_codes.py",
     "tests/test_privacy_gate_files.py",
+    "tests/test_privacy_gate_home_paths.py",
     "tests/test_privacy_gate_identity.py",
+    "tests/test_privacy_gate_skipped.py",
 ]
 also_copy = ["scripts/install-hooks.sh"]
 # The hook tests start the script from a temporary repo, where mutmut can't find its config.

@@ -445,15 +445,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--denylist",
         help=f"deny-list file (default: ${ENV_DENYLIST}, then {DEFAULT_DENYLIST})",
     )
-    parser.add_argument(
+    denylist_mode = parser.add_mutually_exclusive_group()
+    denylist_mode.add_argument(
         "--generic-only",
         action="store_true",
         help="skip the personal deny-list and run only the generic checks",
     )
-    parser.add_argument(
+    denylist_mode.add_argument(
         "--require-denylist",
         action="store_true",
-        help="exit 2 if the deny-list file is missing, instead of a notice",
+        help="exit 2 if the deny-list file is missing, instead of a notice "
+        "(the git hooks pass this; it cannot be combined with --generic-only)",
     )
     parser.add_argument(
         "--allow-skipped",

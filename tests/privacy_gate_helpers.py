@@ -10,7 +10,11 @@ import contextlib
 import importlib.util
 import io
 import os
+import shutil
+import subprocess
 import sys
+import tempfile
+import unittest
 from pathlib import Path
 from types import ModuleType
 from unittest import mock
@@ -67,3 +71,42 @@ def setup_repo(tmp: str, body: str) -> tuple[Path, Path]:
     denylist = Path(tmp) / "denylist.txt"
     denylist.write_text(DENYLIST)
     return root, denylist
+
+
+class HookRepoTestCase(unittest.TestCase):
+    """A throwaway repo with the gate copied in, to run real git hooks in."""
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name) / "repo"
+        (self.root / "scripts").mkdir(parents=True)
+        for name in ["privacy_gate.py", "install-hooks.sh"]:
+            shutil.copy(SCRIPT.parent / name, self.root / "scripts")
+        self.denylist = Path(tmp.name) / "denylist.txt"
+        self.denylist.write_text(DENYLIST)
+        email = "alice" + AT + "example.com"
+        # Drop GIT_DIR and the like, so a run from inside a hook can't commit here.
+        self.env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        self.env |= {
+            "HC2_PRIVACY_DENYLIST": str(self.denylist),
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_CEILING_DIRECTORIES": tmp.name,
+            "GIT_EDITOR": "true",
+            "GIT_AUTHOR_NAME": "alice",
+            "GIT_AUTHOR_EMAIL": email,
+            "GIT_COMMITTER_NAME": "alice",
+            "GIT_COMMITTER_EMAIL": email,
+        }
+        self.run_in_repo("git", "init", "-q")
+        self.notes = self.root / "notes.md"
+
+    def run_in_repo(self, *argv: str) -> tuple[int, str]:
+        done = subprocess.run(
+            argv, cwd=self.root, env=self.env, capture_output=True, text=True
+        )
+        return done.returncode, done.stdout + done.stderr
+
+    def install(self, *options: str) -> tuple[int, str]:
+        return self.run_in_repo("sh", "scripts/install-hooks.sh", *options)
