@@ -20,7 +20,7 @@ from hc2.redact import (
 )
 
 HOME = "/home/alice"
-CLIENT = "/home/alice/clients/example-client"
+CLIENT = "/home/alice/example-clients/example-client"
 MATTER = "/home/alice/legal/example-matter"
 
 
@@ -55,29 +55,35 @@ class LabelTests(unittest.TestCase):
         self.assertEqual(first, second)
 
     def test_duplicates_share_a_label_and_do_not_skip_letters(self) -> None:
-        r = redactor(CLIENT, CLIENT + "/", "~/clients/example-client", MATTER)
+        r = redactor(CLIENT, CLIENT + "/", "~/example-clients/example-client", MATTER)
         self.assertEqual(r.labels, ("Confidential A", "Confidential B"))
         self.assertEqual(r.label_for(MATTER), "Confidential B")
 
     def test_tilde_and_absolute_forms_match(self) -> None:
-        r = redactor("~/clients/example-client")
+        r = redactor("~/example-clients/example-client")
         self.assertEqual(r.label_for(CLIENT), "Confidential A")
-        self.assertEqual(r.label_for("~/clients/example-client/x"), "Confidential A")
+        self.assertEqual(
+            r.label_for("~/example-clients/example-client/x"), "Confidential A"
+        )
 
     def test_inside_matches_but_siblings_do_not(self) -> None:
         r = redactor(CLIENT)
         self.assertEqual(r.label_for(CLIENT + "/deep/er"), "Confidential A")
         self.assertIsNone(r.label_for(CLIENT + "-2"))
-        self.assertIsNone(r.label_for("/home/alice/clients"))
+        self.assertIsNone(r.label_for("/home/alice/example-clients"))
         self.assertIsNone(r.label_for(None))
 
     def test_matching_ignores_case(self) -> None:
         self.assertEqual(redactor(CLIENT).label_for(CLIENT.upper()), "Confidential A")
 
     def test_the_most_specific_folder_wins(self) -> None:
-        r = redactor("/home/alice/clients", "/home/alice/clients/example-client")
+        r = redactor(
+            "/home/alice/example-clients", "/home/alice/example-clients/example-client"
+        )
         self.assertEqual(r.label_for(CLIENT + "/x"), "Confidential B")
-        self.assertEqual(r.label_for("/home/alice/clients/other"), "Confidential A")
+        self.assertEqual(
+            r.label_for("/home/alice/example-clients/other"), "Confidential A"
+        )
 
     def test_normalise_folder(self) -> None:
         self.assertEqual(normalise_folder("~/a/../b/", HOME), "/home/alice/b")
@@ -110,17 +116,21 @@ class SessionTests(unittest.TestCase):
         self.assertEqual((clean.title, clean.folder), (UNLABELLED, UNLABELLED))
 
     def test_ordinary_session_keeps_its_title_and_shortens_the_folder(self) -> None:
-        session = Session("s1", "h", title="Example Project", folder=HOME + "/proj")
+        session = Session(
+            "s1", "h", title="Example Project", folder=HOME + "/example-project"
+        )
         clean = redactor().session(session)
         self.assertEqual(clean.title, "Example Project")
-        self.assertEqual(clean.folder, "~/proj")
+        self.assertEqual(clean.folder, "~/example-project")
         self.assertFalse(clean.confidential)
 
     def test_hide_titles_masks_every_title(self) -> None:
-        session = Session("s1", "h", title="Example Project", folder=HOME + "/proj")
+        session = Session(
+            "s1", "h", title="Example Project", folder=HOME + "/example-project"
+        )
         clean = redactor(hide=True).session(session)
         self.assertEqual(clean.title, HIDDEN_TITLE)
-        self.assertEqual(clean.folder, "~/proj")
+        self.assertEqual(clean.folder, "~/example-project")
 
     def test_missing_fields_stay_missing(self) -> None:
         clean = redactor().session(Session("s1", "h"))
@@ -158,14 +168,14 @@ class TermTests(unittest.TestCase):
             "s1",
             "h",
             title="Plan for Sentinel   Codename launch",
-            folder=HOME + "/proj",
+            folder=HOME + "/example-project",
         )
         clean = with_terms().session(session)
         self.assertEqual(clean.title, TERM_LABEL)
         self.assertEqual(clean.folder, TERM_LABEL)
         self.assertTrue(clean.confidential)
         self.assertNotIn("odename", clean.to_json())
-        self.assertNotIn("proj", clean.to_json())
+        self.assertNotIn("example-project", clean.to_json())
 
     def test_a_folder_term_masks_too(self) -> None:
         session = Session("s1", "h", title="Notes", folder=HOME + "/work/tarn-app")
