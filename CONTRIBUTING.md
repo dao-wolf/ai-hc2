@@ -40,7 +40,7 @@ This repo is public, so personal data must never reach it. `scripts/privacy_gate
 
 - terms from your own **deny-list**, kept outside the repo;
 - email addresses (except noreply and example.com ones);
-- absolute home paths such as `/Users/<name>/` or `/home/<name>/`;
+- home paths such as `/Users/<name>/`, `/home/<name>/` or a Windows user folder, and folders under `~` or `$HOME`. Hidden folders such as `~/.config` pass, and so do `Library`, `Applications` and folders that start with `example`;
 - common secret formats, such as AWS key ids, GitHub tokens and private key headers.
 
 `make hooks` installs two git hooks that run the gate. The pre-commit hook scans the staged copy of each file, which is what the commit will hold, and the name and email git will put on the commit. The commit-msg hook scans the commit message, leaving out the diff that `git commit -v` adds below it. `make check` and `make privacy` scan the files on disk instead.

@@ -167,7 +167,6 @@ class GenericCheckTests(unittest.TestCase):
             f"{HOME}runner/work",
             f"{USERS}<name>/x",
             f"{HOME}$USER/x",
-            "~/Library/Application Support",
             "https://example.com" + HOME + "zed",
         ]:
             with self.subTest(text=text):

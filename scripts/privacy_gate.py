@@ -57,15 +57,37 @@ ALLOWED_EMAIL_DOMAINS = {"example.com", "users.noreply.github.com"}
 ALLOWED_EMAIL_SUFFIX = ".example.com"
 
 HOME_PATH_RE = re.compile(r"(?<![\w.~-])/(?:Users|home)/([A-Za-z0-9._-]+)")
+# A Windows home folder: drive letter, Users, then the name. With forward
+# slashes HOME_PATH_RE already matches.
+WINDOWS_HOME_RE = re.compile(r"(?<![\w.~-])[A-Za-z]:\\Users\\([A-Za-z0-9._-]+)")
+# A folder under the home shorthand (a tilde, $HOME or ${HOME} and a slash).
+# Hidden folders are where tools keep their settings, so they pass.
+TILDE_PATH_RE = re.compile(
+    r"(?<![\w.~/$-])(?:~|\$HOME|\$\{HOME\})/([A-Za-z0-9_][A-Za-z0-9._/-]*)"
+)
+# Folders that name no one: where an operating system keeps application data,
+# and placeholders. A single character such as x is one too. Only the first
+# folder counts: a personal folder with "example" further down is still personal.
+ALLOWED_HOME_FOLDERS = {
+    "applications",
+    "library",
+    "path",
+    "project",
+    "projects",
+    "repo",
+}
+MADE_UP_FOLDER_PREFIX = "example"
 ALLOWED_HOME_NAMES = {
     "alice",
     "bob",
     "carol",
     "dave",
+    "default",
     "eve",
     "example",
     "me",
     "name",
+    "public",
     "runner",
     "shared",
     "user",
@@ -159,13 +181,36 @@ def _email_allowed(match: re.Match[str]) -> bool:
     )
 
 
+def _folders_allowed(path: str) -> bool:
+    """Whether a path under the home shorthand names nothing personal."""
+    folders = path.lower().split("/")
+    first = folders[0]
+    return (
+        len(first) == 1
+        or first in ALLOWED_HOME_FOLDERS
+        or first.startswith(MADE_UP_FOLDER_PREFIX)
+    )
+
+
+def _has_personal_home_path(line: str) -> bool:
+    """A user name or a folder under the home shorthand that isn't made up."""
+    users = (
+        m.group(1).lower()
+        for rx in (HOME_PATH_RE, WINDOWS_HOME_RE)
+        for m in rx.finditer(line)
+    )
+    folders = (m.group(1) for m in TILDE_PATH_RE.finditer(line))
+    return any(u not in ALLOWED_HOME_NAMES for u in users) or any(
+        not _folders_allowed(f) for f in folders
+    )
+
+
 def generic_labels(line: str) -> list[str]:
     """Labels of every generic check that the line trips."""
     labels: list[str] = []
     if any(not _email_allowed(m) for m in EMAIL_RE.finditer(line)):
         labels.append("email")
-    names = (m.group(1).lower() for m in HOME_PATH_RE.finditer(line))
-    if any(name not in ALLOWED_HOME_NAMES for name in names):
+    if _has_personal_home_path(line):
         labels.append("home-path")
     labels.extend(label for label, rx in SECRET_PATTERNS if rx.search(line))
     return labels

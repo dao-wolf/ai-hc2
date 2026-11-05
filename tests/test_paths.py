@@ -34,9 +34,9 @@ class PathsTests(unittest.TestCase):
 
     def test_override_may_use_a_tilde(self) -> None:
         with tempfile.TemporaryDirectory() as home:
-            env = {"HOME": home, "HC2_CONFIG_DIR": "~/elsewhere"}
+            env = {"HOME": home, "HC2_CONFIG_DIR": "~/example-elsewhere"}
             with mock.patch.dict(os.environ, env):
-                self.assertEqual(paths.config_dir(), Path(home) / "elsewhere")
+                self.assertEqual(paths.config_dir(), Path(home) / "example-elsewhere")
 
     def test_relative_override_becomes_absolute(self) -> None:
         with mock.patch.dict(os.environ, {"HC2_STATE_DIR": "relative/state"}):

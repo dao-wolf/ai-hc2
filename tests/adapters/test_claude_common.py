@@ -51,34 +51,34 @@ class ValueTests(unittest.TestCase):
 class ConfidentialMatcherTests(unittest.TestCase):
     def setUp(self) -> None:
         self.matcher = ConfidentialMatcher(
-            ["~/legal/example-matter/", ""], "/home/alice"
+            ["~/example-legal/example-matter/", ""], "/home/alice"
         )
 
     def test_folder_and_everything_below_it(self) -> None:
         check = self.matcher.folder_is_confidential
-        self.assertTrue(check("/home/alice/legal/example-matter"))
-        self.assertTrue(check("/home/alice/legal/example-matter/deep/er"))
-        self.assertTrue(check("/home/alice/legal/example-matter/"))
-        self.assertTrue(check("/HOME/alice/legal/Example-Matter"))
-        self.assertTrue(check(None, "/home/alice/legal/example-matter"))
+        self.assertTrue(check("/home/alice/example-legal/example-matter"))
+        self.assertTrue(check("/home/alice/example-legal/example-matter/deep/er"))
+        self.assertTrue(check("/home/alice/example-legal/example-matter/"))
+        self.assertTrue(check("/HOME/alice/example-legal/Example-Matter"))
+        self.assertTrue(check(None, "/home/alice/example-legal/example-matter"))
 
     def test_siblings_and_parents_are_not_inside(self) -> None:
         check = self.matcher.folder_is_confidential
-        self.assertFalse(check("/home/alice/legal"))
-        self.assertFalse(check("/home/alice/legal/example-matter-two"))
-        self.assertFalse(check("/home/alice/legal/other/../elsewhere"))
+        self.assertFalse(check("/home/alice/example-legal"))
+        self.assertFalse(check("/home/alice/example-legal/example-matter-two"))
+        self.assertFalse(check("/home/alice/example-legal/other/../elsewhere"))
         self.assertFalse(check(None, ""))
 
     def test_dotdot_is_resolved_before_comparing(self) -> None:
-        inside = "/home/alice/x/../legal/example-matter/a"
+        inside = "/home/alice/x/../example-legal/example-matter/a"
         self.assertTrue(self.matcher.folder_is_confidential(inside))
 
     def test_project_folder_names_match_by_prefix_safely(self) -> None:
         check = self.matcher.project_dir_is_confidential
-        self.assertTrue(check("-home-alice-legal-example-matter"))
-        self.assertTrue(check("-home-alice-legal-example-matter-sub"))
-        self.assertTrue(check("-home-alice-legal-example-matter-two"))
-        self.assertFalse(check("-home-alice-legal"))
+        self.assertTrue(check("-home-alice-example-legal-example-matter"))
+        self.assertTrue(check("-home-alice-example-legal-example-matter-sub"))
+        self.assertTrue(check("-home-alice-example-legal-example-matter-two"))
+        self.assertFalse(check("-home-alice-example-legal"))
 
     def test_the_root_folder_covers_everything(self) -> None:
         self.assertTrue(ConfidentialMatcher(["/"], "/h").folder_is_confidential("/a/b"))
