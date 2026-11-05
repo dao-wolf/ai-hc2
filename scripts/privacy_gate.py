@@ -537,6 +537,15 @@ def report_oversize(oversize: Sequence[str], allowed: bool) -> None:
         )
 
 
+def left_unchecked(oversize: Sequence[str], hits: Sequence[Hit], allowed: bool) -> bool:
+    """True when a file was too large to scan and nothing else explains a failing
+    run: hits already fail it, and --allow-skipped accepts the skip.
+    """
+    if allowed or hits:
+        return False
+    return bool(oversize)
+
+
 def run(args: argparse.Namespace) -> int:
     """Scan what the options name. Anything that goes wrong raises."""
     terms = load_terms(args)
@@ -548,7 +557,7 @@ def run(args: argparse.Namespace) -> int:
     for hit in hits:
         print(hit)
     report_oversize(oversize, args.allow_skipped)
-    if oversize and not hits and not args.allow_skipped:
+    if left_unchecked(oversize, hits, args.allow_skipped):
         return 2
     print(f"privacy gate: {summary}, {len(hits)} hits.", file=sys.stderr)
     return 1 if hits else 0
