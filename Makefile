@@ -29,4 +29,4 @@ mutation:
 	mutmut results
 
 hooks:
-	sh scripts/install-hooks.sh
+	sh scripts/install-hooks.sh $(if $(GENERIC_ONLY),--generic-only)

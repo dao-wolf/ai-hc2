@@ -126,5 +126,14 @@ class EmptyDenylistTests(unittest.TestCase):
         self.assertRegex(last_line(err), SUMMARY_RE)
 
 
+class ConflictingOptionsTests(unittest.TestCase):
+    def test_generic_only_with_require_denylist_exits_2_not_a_quiet_pass(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root, deny = setup_repo(tmp, "all good\n")
+            with self.assertRaises(SystemExit) as raised:
+                run_gate("--root", str(root), "--generic-only", "--require-denylist")
+        self.assertEqual(raised.exception.code, 2)
+
+
 if __name__ == "__main__":
     unittest.main()

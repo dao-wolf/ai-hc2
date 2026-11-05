@@ -2,7 +2,20 @@
 # Install the git hooks that run the privacy gate: pre-commit scans the staged
 # files and the commit identity, and commit-msg scans the commit message.
 # Run it with `make hooks`. It never overwrites a hook it did not write.
+#
+# The hooks need your personal deny-list: with none, or an empty one, they stop
+# the commit. If you have no deny-list, run `make hooks GENERIC_ONLY=1`. Those
+# hooks check emails, home paths and secrets only, and say so on every commit.
 set -eu
+
+case "${1:-}" in
+  "") flag="--require-denylist" ;;
+  --generic-only) flag="--generic-only" ;;
+  *)
+    echo "usage: install-hooks.sh [--generic-only]" >&2
+    exit 2
+    ;;
+esac
 
 marker="installed by scripts/install-hooks.sh"
 failed=0
@@ -26,6 +39,13 @@ HOOK
   echo "Installed the privacy-gate $1 hook."
 }
 
-install_hook pre-commit "--check-identity --staged"
-install_hook commit-msg '--message "$1"'
+install_hook pre-commit "--check-identity --staged $flag"
+install_hook commit-msg "--message \"\$1\" $flag"
+
+if [ "$flag" = "--generic-only" ]; then
+  echo "NOTICE: your personal deny-list is not checked by these hooks." >&2
+else
+  echo "These hooks stop a commit when your deny-list is missing or empty."
+  echo "With no deny-list, run: make hooks GENERIC_ONLY=1"
+fi
 exit "$failed"
