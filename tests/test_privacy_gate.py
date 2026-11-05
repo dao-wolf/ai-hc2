@@ -213,12 +213,12 @@ class TreeScanTests(unittest.TestCase):
             root = Path(tmp)
             self.make_tree(root)
             with mock.patch.object(gate.subprocess, "run", side_effect=OSError):
-                hits, scanned, skipped = gate.scan_tree(root, terms)
+                result = gate.scan_tree(root, terms)
         self.assertEqual(
-            [(h.path, h.line, h.label) for h in hits],
+            [(h.path, h.line, h.label) for h in result.hits],
             [("docs/leak.md", 2, "term#2"), ("zorblax-name.txt", 0, "term#2")],
         )
-        self.assertEqual((scanned, skipped), (3, 1))
+        self.assertEqual((result.scanned, result.binary), (3, 1))
 
     def test_git_listing_includes_untracked_and_honours_gitignore(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

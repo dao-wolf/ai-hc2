@@ -23,16 +23,23 @@ Output is one line per hit: `file:line term#N`. N is the term's line number in
 the deny-list file. The term itself is never printed, and neither is the text
 matched by a generic check. Line 0 means the file's name matched.
 
+A file the gate cannot read as text is not checked, so it is never skipped
+quietly. A file over 5 MB is named and the run exits 2, unless --allow-skipped
+turns that into a notice. A binary file (a NUL byte near the start) is only
+counted. UTF-16 and UTF-32 text with a byte order mark is read as text.
+
 Exit codes: 0 clean, 1 hits found, 2 the gate could not run. Any failure, of
-any kind, exits 2. Exit 0 and 1 happen only after the scan finished, and a
-finished scan ends with a summary line on stderr: `privacy gate: scanned ...,
-N hits.` A run that exits 2 never prints that line.
+any kind, exits 2, as does a file left unchecked for being too large. Exit 0
+and 1 happen only after the scan finished, and a finished scan ends with a
+summary line on stderr: `privacy gate: scanned ..., N hits.` A run that exits
+2 never prints that line.
 Standard library only.
 """
 
 from __future__ import annotations
 
 import argparse
+import codecs
 import os
 import re
 import subprocess
@@ -44,6 +51,15 @@ from pathlib import Path
 ENV_DENYLIST = "HC2_PRIVACY_DENYLIST"
 DEFAULT_DENYLIST = "~/.config/ai-hc2/privacy-denylist.txt"
 MAX_BYTES = 5_000_000
+# A file that starts with one of these marks is text in that encoding, though it
+# holds NUL bytes. Without a mark, a NUL in the first bytes means binary.
+TEXT_BOMS = (
+    (codecs.BOM_UTF32_LE, "utf-32"),
+    (codecs.BOM_UTF32_BE, "utf-32"),
+    (codecs.BOM_UTF16_LE, "utf-16"),
+    (codecs.BOM_UTF16_BE, "utf-16"),
+)
+BINARY_CHECK_BYTES = 8192
 SEPARATORS = r"[\s_-]+"
 # Only a separator between two other characters is loosened. A loose one at the
 # start of a term would make the search slow on a long run of hyphens.
@@ -130,7 +146,24 @@ class Hit:
     label: str
 
     def __str__(self) -> str:
-        return f"{self.path}:{self.line} {self.label}"
+        return f"{printable(self.path)}:{self.line} {self.label}"
+
+
+def printable(name: str) -> str:
+    """A file name safe to print: a byte that is not UTF-8 shows as \\xNN."""
+    return os.fsencode(name).decode("utf-8", "backslashreplace")
+
+
+@dataclass(frozen=True)
+class ScanResult:
+    """What a scan of files found. `binary` files hold NUL bytes and are only
+    counted; each `oversize` file is named, because nobody checked it.
+    """
+
+    hits: list[Hit]
+    scanned: int
+    binary: int
+    oversize: list[str]
 
 
 @dataclass(frozen=True)
@@ -262,7 +295,7 @@ def list_files(root: Path) -> list[str]:
     command += ["--cached", "--others", "--exclude-standard"]
     try:
         done = subprocess.run(command, capture_output=True, check=True)
-        names = [n for n in done.stdout.decode("utf-8", "replace").split("\0") if n]
+        names = [os.fsdecode(n) for n in done.stdout.split(b"\0") if n]
     except (OSError, subprocess.CalledProcessError):
         names = [
             str(p.relative_to(root))
@@ -273,31 +306,42 @@ def list_files(root: Path) -> list[str]:
     return sorted(found)
 
 
+def decode_text(data: bytes) -> str | None:
+    """The text in a file's bytes, or None when it is binary."""
+    for mark, codec in TEXT_BOMS:
+        if data.startswith(mark):
+            return data.decode(codec, "replace")
+    if b"\0" in data[:BINARY_CHECK_BYTES]:
+        return None
+    return data.decode("utf-8", "replace")
+
+
 def scan_files(
     sizes: dict[str, int],
     read: Callable[[str], bytes],
     terms: Sequence[Term],
-) -> tuple[list[Hit], int, int]:
-    """Scan files by name. Returns the hits, files scanned and files skipped."""
+) -> ScanResult:
+    """Scan files by name. Their names are always checked; a file over
+    MAX_BYTES is not read, and a binary one is not searched.
+    """
     hits: list[Hit] = []
-    scanned = skipped = 0
+    scanned = binary = 0
+    oversize: list[str] = []
     for name, size in sizes.items():
         hits.extend(scan_name(name, terms))
         if size > MAX_BYTES:
-            skipped += 1
-            note = f"privacy gate: skipped {name} (over {MAX_BYTES} bytes)"
-            print(note, file=sys.stderr)
+            oversize.append(name)
             continue
-        data = read(name)
-        if b"\0" in data[:8192]:
-            skipped += 1
+        text = decode_text(read(name))
+        if text is None:
+            binary += 1
             continue
         scanned += 1
-        hits.extend(scan_text(name, data.decode("utf-8", "replace"), terms))
-    return sorted(set(hits)), scanned, skipped
+        hits.extend(scan_text(name, text, terms))
+    return ScanResult(sorted(set(hits)), scanned, binary, oversize)
 
 
-def scan_tree(root: Path, terms: Sequence[Term]) -> tuple[list[Hit], int, int]:
+def scan_tree(root: Path, terms: Sequence[Term]) -> ScanResult:
     """Scan a folder's files as they are on disk."""
     sizes = {name: (root / name).stat().st_size for name in list_files(root)}
     return scan_files(sizes, lambda name: (root / name).read_bytes(), terms)
@@ -312,7 +356,7 @@ def staged_entries(root: Path) -> list[tuple[str, bytes]]:
         info, name = record.split(b"\t", 1)
         mode, object_id, _stage = info.split()
         if mode != b"160000":
-            entries.append((name.decode("utf-8", "replace"), object_id))
+            entries.append((os.fsdecode(name), object_id))
     return entries
 
 
@@ -349,7 +393,7 @@ def staged_files(root: Path) -> dict[str, bytes]:
     return files
 
 
-def scan_index(root: Path, terms: Sequence[Term]) -> tuple[list[Hit], int, int]:
+def scan_index(root: Path, terms: Sequence[Term]) -> ScanResult:
     """Scan what the next commit will hold, leaving out unstaged edits."""
     files = staged_files(root)
     sizes = {name: len(data) for name, data in files.items()}
@@ -412,6 +456,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="exit 2 if the deny-list file is missing, instead of a notice",
     )
     parser.add_argument(
+        "--allow-skipped",
+        action="store_true",
+        help="accept files that are too large to scan: name them in a notice "
+        "instead of exiting 2",
+    )
+    parser.add_argument(
         "--check-identity",
         action="store_true",
         help="also check the author and committer git will use (the pre-commit "
@@ -460,13 +510,31 @@ def load_terms(args: argparse.Namespace) -> list[Term] | None:
 
 def scan_source(
     args: argparse.Namespace, terms: Sequence[Term]
-) -> tuple[list[Hit], str]:
-    """Scan what the options name. Returns the hits and a summary for the log."""
+) -> tuple[list[Hit], str, list[str]]:
+    """Scan what the options name. Returns the hits, a summary for the log and
+    the files that were too large to scan.
+    """
     if args.message:
-        return scan_message(args.message, terms), "scanned the commit message"
+        return scan_message(args.message, terms), "scanned the commit message", []
     scan = scan_index if args.staged else scan_tree
-    hits, scanned, skipped = scan(args.root, terms)
-    return hits, f"scanned {scanned} files, skipped {skipped}"
+    result = scan(args.root, terms)
+    skipped = result.binary + len(result.oversize)
+    summary = f"scanned {result.scanned} files, skipped {skipped}"
+    return result.hits, summary, result.oversize
+
+
+def report_oversize(oversize: Sequence[str], allowed: bool) -> None:
+    """Name every file that was too large to scan, and say what that means."""
+    word = "NOTICE skipped" if allowed else "NOT SCANNED"
+    for name in oversize:
+        note = f"privacy gate: {word} {printable(name)} (over {MAX_BYTES} bytes)"
+        print(note, file=sys.stderr)
+    if oversize and not allowed:
+        print(
+            "privacy gate: files above were not checked. Shrink or remove them, "
+            "or pass --allow-skipped to accept the skip.",
+            file=sys.stderr,
+        )
 
 
 def run(args: argparse.Namespace) -> int:
@@ -474,11 +542,14 @@ def run(args: argparse.Namespace) -> int:
     terms = load_terms(args)
     if terms is None:
         return 2
-    hits, summary = scan_source(args, terms)
+    hits, summary, oversize = scan_source(args, terms)
     if args.check_identity:
         hits = sorted(set(hits) | set(scan_identity(args.root, terms)))
     for hit in hits:
         print(hit)
+    report_oversize(oversize, args.allow_skipped)
+    if oversize and not hits and not args.allow_skipped:
+        return 2
     print(f"privacy gate: {summary}, {len(hits)} hits.", file=sys.stderr)
     return 1 if hits else 0
 
