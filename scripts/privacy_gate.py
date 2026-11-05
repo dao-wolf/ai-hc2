@@ -23,10 +23,10 @@ Output is one line per hit: `file:line term#N`. N is the term's line number in
 the deny-list file. The term itself is never printed, and neither is the text
 matched by a generic check. Line 0 means the file's name matched.
 
-A file the gate cannot read as text is not checked, so it is never skipped
-quietly. A file over 5 MB is named and the run exits 2, unless --allow-skipped
-turns that into a notice. A binary file (a NUL byte near the start) is only
-counted. UTF-16 and UTF-32 text with a byte order mark is read as text.
+A file over 5 MB is not searched, so the gate names it and exits 2, unless
+--allow-skipped turns that into a notice. A binary file (a NUL byte near the
+start) is not searched either, and is only counted, not named. UTF-16 and
+UTF-32 text with a byte order mark is read as text.
 
 Exit codes: 0 clean, 1 hits found, 2 the gate could not run. Any failure, of
 any kind, exits 2, as does a file left unchecked for being too large. Exit 0
