@@ -5,8 +5,6 @@ Made-up data only. Strings that the gate would flag are built from pieces.
 
 from __future__ import annotations
 
-import contextlib
-import io
 import subprocess
 import tempfile
 import unittest
@@ -20,23 +18,27 @@ class ScanFilesTests(unittest.TestCase):
 
     def scan(
         self, files: dict[str, bytes], sizes: dict[str, int] | None = None
-    ) -> tuple[list[tuple[str, int]], int, int, str]:
+    ) -> tuple[list[tuple[str, int]], int, int, list[str]]:
         terms = gate.parse_terms(DENYLIST)
         sizes = sizes or {name: len(data) for name, data in files.items()}
-        err = io.StringIO()
-        with contextlib.redirect_stderr(err):
-            hits, scanned, skipped = gate.scan_files(sizes, files.__getitem__, terms)
-        return [(h.path, h.line) for h in hits], scanned, skipped, err.getvalue()
+        result = gate.scan_files(sizes, files.__getitem__, terms)
+        hits = [(h.path, h.line) for h in result.hits]
+        return (
+            hits,
+            result.scanned,
+            result.binary + len(result.oversize),
+            result.oversize,
+        )
 
     def test_a_file_over_5_million_bytes_is_skipped_and_the_rest_are_scanned(
         self,
     ) -> None:
         files = {"a.txt": b"zorblax\n", "b.txt": b"ok\nzorblax\n", "c.txt": b"zorblax"}
         sizes = {"a.txt": 5_000_001, "b.txt": 11, "c.txt": 5_000_001}
-        hits, scanned, skipped, err = self.scan(files, sizes)
+        hits, scanned, skipped, oversize = self.scan(files, sizes)
         self.assertEqual(hits, [("b.txt", 2)])
         self.assertEqual((scanned, skipped), (1, 2))
-        self.assertIn("a.txt", err)
+        self.assertEqual(oversize, ["a.txt", "c.txt"])
 
     def test_a_file_of_exactly_5_million_bytes_is_scanned(self) -> None:
         hits, scanned, skipped, _ = self.scan(
