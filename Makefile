@@ -6,8 +6,15 @@ export PYTHONPATH := src
 test:
 	$(PYTHON) -m unittest discover -s tests
 
+# The whole branch: the files as they are now, then every commit RANGE adds,
+# messages included. It needs your deny-list; with none, run it with
+# GENERIC_ONLY=1 to check emails, home paths and secrets only.
+RANGE ?= origin/main..HEAD
+privacy_mode = $(if $(filter 1,$(GENERIC_ONLY)),--generic-only,--require-denylist)
+
 privacy:
-	$(PYTHON) scripts/privacy_gate.py
+	$(PYTHON) scripts/privacy_gate.py $(privacy_mode)
+	$(PYTHON) scripts/privacy_gate.py $(privacy_mode) --range $(RANGE)
 
 # Everything that runs without extra installs: tests, byte-compile, privacy gate.
 check: test
@@ -29,4 +36,4 @@ mutation:
 	mutmut results
 
 hooks:
-	sh scripts/install-hooks.sh $(if $(GENERIC_ONLY),--generic-only)
+	sh scripts/install-hooks.sh $(if $(filter 1,$(GENERIC_ONLY)),--generic-only)

@@ -28,6 +28,8 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # The privacy gate reads every commit a change adds, so it needs history.
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
@@ -57,13 +59,22 @@ jobs:
       - name: Privacy gate
         env:
           DENYLIST_B64: ${{ secrets.HC2_PRIVACY_DENYLIST_B64 }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           if [ -n "$DENYLIST_B64" ]; then
             denylist="$(mktemp)"
             trap 'rm -f "$denylist"' EXIT
             printf '%s' "$DENYLIST_B64" | base64 --decode > "$denylist"
-            HC2_PRIVACY_DENYLIST="$denylist" python scripts/privacy_gate.py --require-denylist
+            export HC2_PRIVACY_DENYLIST="$denylist"
+            mode=--require-denylist
           else
             echo "::notice::HC2_PRIVACY_DENYLIST_B64 is not set, so only the generic privacy checks ran."
-            python scripts/privacy_gate.py --generic-only
+            mode=--generic-only
+          fi
+          python scripts/privacy_gate.py $mode
+          if printf '%s' "$BASE_SHA" | grep -qE '^0*$'; then
+            echo "::warning::This run has no base commit, so only the files at the tip were scanned, not the commits."
+          else
+            python scripts/privacy_gate.py $mode --range "$BASE_SHA..$HEAD_SHA"
           fi

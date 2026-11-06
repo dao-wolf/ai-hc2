@@ -4,7 +4,14 @@
 By default it scans every tracked file, plus untracked files that git does not
 ignore, as they are on disk. With --staged it scans the staged copy of each
 file instead, which is what the next commit will hold. With --message it scans
-only a commit message file. Two sets of checks run:
+only a commit message file. With --range BASE..HEAD it scans each commit in the
+range: its message, author and committer, the names of the files it touches and
+the lines it adds, so a leak that one commit adds and a later one removes is
+still found. With --pre-push it reads the ref lines git gives a pre-push hook
+and scans the same way, covering only the commits the push would send. A hit is
+shown as `<first 10 characters of the commit id>:<file>:line`, and a hit in a
+message, author or committer is shown as `<message>`, `<author>` or
+`<committer>` in place of the file. Two sets of checks run:
 
 1. A personal deny-list that lives outside the repo. Its path comes from the
    environment variable HC2_PRIVACY_DENYLIST, and defaults to
@@ -44,6 +51,7 @@ import os
 import re
 import subprocess
 import sys
+from collections import Counter
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -131,6 +139,16 @@ SCISSORS_RE = re.compile(r"^\S+ -{24} >8 -{24}$", re.MULTILINE)
 
 # The first line git prints for an object read with `cat-file --batch`.
 OBJECT_HEADER_RE = re.compile(rb"[0-9a-f]+ [a-z]+ ([0-9]+)\n")
+
+# A commit id as git writes it (SHA-1 or SHA-256), and the all-zero id that git
+# uses for "no such object" in a pre-push hook and in a diff.
+COMMIT_ID_RE = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
+COMMIT_ID_SHORT = 10
+
+DENYLIST_NEXT_STEP = (
+    "privacy gate: create your deny-list (see CONTRIBUTING.md). With none, "
+    "run: make hooks GENERIC_ONLY=1"
+)
 
 
 class ScanError(Exception):
@@ -375,6 +393,22 @@ def read_object(out: bytes, at: int) -> tuple[bytes, int]:
     return out[start:end], end + 1
 
 
+def read_objects(root: Path, ids: Sequence[bytes]) -> dict[bytes, bytes]:
+    """The content of each git object, by id. Raises OSError or
+    CalledProcessError when git can't be read, and ScanError when an object is
+    missing or git's answer is cut short.
+    """
+    unique = list(dict.fromkeys(ids))
+    command = ["git", "-C", str(root), "cat-file", "--batch"]
+    request = b"".join(object_id + b"\n" for object_id in unique)
+    out = subprocess.run(command, input=request, capture_output=True, check=True).stdout
+    found: dict[bytes, bytes] = {}
+    at = 0
+    for object_id in unique:
+        found[object_id], at = read_object(out, at)
+    return found
+
+
 def staged_files(root: Path) -> dict[str, bytes]:
     """The staged copy of every file in git's index, by path.
 
@@ -383,14 +417,8 @@ def staged_files(root: Path) -> dict[str, bytes]:
     an object is missing or git's answer is cut short.
     """
     entries = staged_entries(root)
-    command = ["git", "-C", str(root), "cat-file", "--batch"]
-    ids = b"".join(object_id + b"\n" for _, object_id in entries)
-    out = subprocess.run(command, input=ids, capture_output=True, check=True).stdout
-    files: dict[str, bytes] = {}
-    at = 0
-    for name, _ in entries:
-        files[name], at = read_object(out, at)
-    return files
+    objects = read_objects(root, [object_id for _, object_id in entries])
+    return {name: objects[object_id] for name, object_id in entries}
 
 
 def scan_index(root: Path, terms: Sequence[Term]) -> ScanResult:
@@ -425,6 +453,182 @@ def scan_identity(root: Path, terms: Sequence[Term]) -> list[Hit]:
         ident = done.stdout.decode("utf-8", "replace").strip().rsplit(">", 1)[0] + ">"
         hits.extend(scan_text(f"<git {role}>", ident, terms))
     return sorted(set(hits))
+
+
+@dataclass(frozen=True)
+class Change:
+    """A file a commit adds or edits. `old_id` is all zeros for a new file."""
+
+    path: str
+    old_id: bytes
+    new_id: bytes
+
+
+def is_zero_id(object_id: bytes | str) -> bool:
+    return not object_id.strip(b"0" if isinstance(object_id, bytes) else "0")
+
+
+def prefixed(hits: Iterable[Hit], prefix: str) -> list[Hit]:
+    """The hits with a commit id in front of each path."""
+    return [Hit(f"{prefix}:{hit.path}", hit.line, hit.label) for hit in hits]
+
+
+def rev_list(root: Path, selection: Sequence[str]) -> list[str]:
+    """The ids of the commits a selection names, oldest first."""
+    command = ["git", "-C", str(root), "rev-list", "--reverse", *selection, "--"]
+    done = subprocess.run(command, capture_output=True, check=True, text=True)
+    return done.stdout.split()
+
+
+def commit_changes(root: Path, commit: str) -> list[Change]:
+    """The files a commit adds or edits. Deleted files and submodules are left
+    out. A merge commit has none: the commits it brings in are scanned on their
+    own.
+    """
+    command = ["git", "-C", str(root), "diff-tree", "-r", "-z", "--root"]
+    command += ["--no-renames", "--no-commit-id", commit]
+    out = subprocess.run(command, capture_output=True, check=True).stdout
+    fields = out.split(b"\0")
+    changes: list[Change] = []
+    for info, name in zip(fields[0::2], fields[1::2], strict=False):
+        _old_mode, new_mode, old_id, new_id, status = info.lstrip(b":").split()
+        if status != b"D" and new_mode != b"160000":
+            changes.append(Change(os.fsdecode(name), old_id, new_id))
+    return changes
+
+
+def commit_idents_and_message(
+    root: Path, commit: str
+) -> tuple[list[tuple[str, str]], str]:
+    """The author and committer of a commit as ("author", "Name <email>"), and
+    its message.
+    """
+    command = ["git", "-C", str(root), "cat-file", "commit", commit]
+    raw = subprocess.run(command, capture_output=True, check=True).stdout
+    header, _, body = raw.partition(b"\n\n")
+    idents: list[tuple[str, str]] = []
+    for line in header.split(b"\n"):
+        role, _, rest = line.partition(b" ")
+        if role in (b"author", b"committer"):
+            # The ident ends with a timestamp and offset; keep only "Name <email>".
+            ident = rest.decode("utf-8", "replace").rsplit(">", 1)[0] + ">"
+            idents.append((role.decode(), ident))
+    return idents, body.decode("utf-8", "replace")
+
+
+def added_text(old: str, new: str) -> str:
+    """`new` with every line that `old` already had left blank, so the line
+    numbers stay right and only what a commit adds is searched.
+    """
+    known = Counter(old.split("\n"))
+    kept: list[str] = []
+    for line in new.split("\n"):
+        if known[line] > 0:
+            known[line] -= 1
+            kept.append("")
+        else:
+            kept.append(line)
+    return "\n".join(kept)
+
+
+def scan_change(
+    change: Change, objects: dict[bytes, bytes], terms: Sequence[Term]
+) -> tuple[list[Hit], str]:
+    """Scan the lines one change adds. Returns the hits and what became of the
+    file: "scanned", "binary" or "oversize".
+    """
+    hits = scan_name(change.path, terms)
+    new = objects[change.new_id]
+    if len(new) > MAX_BYTES:
+        return hits, "oversize"
+    text = decode_text(new)
+    if text is None:
+        return hits, "binary"
+    old = "" if is_zero_id(change.old_id) else decode_text(objects[change.old_id])
+    added = added_text(old or "", text)
+    return hits + scan_text(change.path, added, terms), "scanned"
+
+
+def scan_commit(root: Path, commit: str, terms: Sequence[Term]) -> ScanResult:
+    """Scan one commit: its message, author, committer and added lines."""
+    prefix = commit[:COMMIT_ID_SHORT]
+    idents, message = commit_idents_and_message(root, commit)
+    hits = scan_text("<message>", message, terms)
+    for role, ident in idents:
+        hits.extend(scan_text(f"<{role}>", ident, terms))
+    changes = commit_changes(root, commit)
+    wanted = [c.new_id for c in changes]
+    wanted += [c.old_id for c in changes if not is_zero_id(c.old_id)]
+    objects = read_objects(root, wanted)
+    tally = {"scanned": 0, "binary": 0}
+    oversize: list[str] = []
+    for change in changes:
+        found, outcome = scan_change(change, objects, terms)
+        hits.extend(found)
+        if outcome == "oversize":
+            oversize.append(f"{prefix}:{change.path}")
+        else:
+            tally[outcome] += 1
+    shown = prefixed(hits, prefix)
+    return ScanResult(shown, tally["scanned"], tally["binary"], oversize)
+
+
+def scan_range(
+    root: Path, selections: Sequence[Sequence[str]], terms: Sequence[Term]
+) -> tuple[ScanResult, int]:
+    """Scan every commit the selections name, each once. Returns the result and
+    the number of commits.
+    """
+    commits = list(dict.fromkeys(c for s in selections for c in rev_list(root, s)))
+    results = [scan_commit(root, commit, terms) for commit in commits]
+    merged = ScanResult(
+        sorted({hit for r in results for hit in r.hits}),
+        sum(r.scanned for r in results),
+        sum(r.binary for r in results),
+        [name for r in results for name in r.oversize],
+    )
+    return merged, len(commits)
+
+
+def range_selection(spec: str) -> list[str]:
+    """What `git rev-list` is asked for by --range: two refs joined by dots."""
+    if ".." not in spec or spec.startswith("-"):
+        raise ScanError(
+            "privacy gate: --range needs BASE..HEAD (two refs joined by '..')."
+        )
+    return [spec]
+
+
+def has_commit(root: Path, commit: str) -> bool:
+    command = ["git", "-C", str(root), "cat-file", "-e", f"{commit}^{{commit}}"]
+    return subprocess.run(command, capture_output=True).returncode == 0
+
+
+def push_ids(line: str) -> tuple[str, str]:
+    """The local and remote commit ids on one line a pre-push hook is given:
+    `<local ref> <local id> <remote ref> <remote id>`.
+    """
+    fields = line.split()
+    ids = fields[1::2]
+    if len(fields) != 4 or not all(COMMIT_ID_RE.fullmatch(i) for i in ids):
+        raise ScanError("privacy gate: could not read the refs git is pushing.")
+    return ids[0], ids[1]
+
+
+def pre_push_selections(root: Path, lines: Iterable[str]) -> list[list[str]]:
+    """Which commits a push sends. A deleted ref sends none. A new ref, or one
+    whose old tip this clone lacks, sends every commit that no remote-tracking
+    branch has. Any other sends everything from the old tip to the new one.
+    """
+    selections: list[list[str]] = []
+    for local, remote in map(push_ids, filter(str.strip, lines)):
+        if is_zero_id(local):
+            continue
+        if is_zero_id(remote) or not has_commit(root, remote):
+            selections.append([local, "--not", "--remotes"])
+        else:
+            selections.append([f"{remote}..{local}"])
+    return selections
 
 
 def resolve_denylist(option: str | None) -> Path:
@@ -482,6 +686,18 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="FILE",
         help="scan only this commit message file (the commit-msg hook passes this)",
     )
+    source.add_argument(
+        "--range",
+        metavar="BASE..HEAD",
+        help="scan each commit in the range: its message, author, committer, "
+        "file names and added lines (make privacy and CI pass this)",
+    )
+    source.add_argument(
+        "--pre-push",
+        action="store_true",
+        help="scan the commits a push would send, from the ref lines on standard "
+        "input (the pre-push hook passes this)",
+    )
     return parser
 
 
@@ -498,16 +714,32 @@ def load_terms(args: argparse.Namespace) -> list[Term] | None:
         print(note, file=sys.stderr)
         if args.require_denylist and not terms:
             print("privacy gate: the deny-list has no terms.", file=sys.stderr)
+            print(DENYLIST_NEXT_STEP, file=sys.stderr)
             return None
         return terms
     if args.require_denylist:
         print("privacy gate: deny-list file not found.", file=sys.stderr)
+        print(DENYLIST_NEXT_STEP, file=sys.stderr)
         return None
     print(
         "privacy gate: NOTICE deny-list file not found, running generic checks only.",
         file=sys.stderr,
     )
     return []
+
+
+def scan_commits(
+    args: argparse.Namespace, terms: Sequence[Term]
+) -> tuple[list[Hit], str, list[str]]:
+    """Scan the commits that --range or --pre-push names."""
+    if args.pre_push:
+        selections = pre_push_selections(args.root, sys.stdin)
+    else:
+        selections = [range_selection(args.range)]
+    result, commits = scan_range(args.root, selections, terms)
+    skipped = result.binary + len(result.oversize)
+    summary = f"scanned {commits} commits, {result.scanned} files, skipped {skipped}"
+    return result.hits, summary, result.oversize
 
 
 def scan_source(
@@ -518,6 +750,8 @@ def scan_source(
     """
     if args.message:
         return scan_message(args.message, terms), "scanned the commit message", []
+    if args.range is not None or args.pre_push:
+        return scan_commits(args, terms)
     scan = scan_index if args.staged else scan_tree
     result = scan(args.root, terms)
     skipped = result.binary + len(result.oversize)
