@@ -7,6 +7,7 @@ Made-up data only.
 
 from __future__ import annotations
 
+import os
 import unittest
 from pathlib import Path
 
@@ -105,6 +106,114 @@ class GenericOnlyHookTests(HookRepoTestCase):
         hook = (self.root / ".git" / "hooks" / "pre-commit").read_text()
         self.assertIn("--require-denylist", hook)
         self.assertNotIn("--generic-only", hook)
+
+
+class PrePushHookTests(HookRepoTestCase):
+    """Commits can reach a remote without the pre-commit hook: a cherry-pick, a
+    merge, a commit made with --no-verify. The pre-push hook checks them last.
+    """
+
+    def commit(self, body: str, message: str = "docs: change") -> None:
+        self.notes.write_text(body)
+        self.run_in_repo("git", "add", "-A")
+        code, output = self.run_in_repo(
+            "git", "commit", "-q", "--no-verify", "--allow-empty", "-m", message
+        )
+        self.assertEqual(code, 0, output)
+
+    def push(self, destination: str) -> tuple[int, str]:
+        return self.run_in_repo("git", "push", "origin", f"HEAD:{destination}")
+
+    def remote_has(self, branch: str) -> bool:
+        _, listing = self.run_in_repo("git", "ls-remote", "--heads", "origin", branch)
+        return branch in listing
+
+    def start(self, first_body: str = "fine\n", *options: str) -> None:
+        """Push a first commit to main, then install the hooks."""
+        self.commit(first_body, "docs: first")
+        bare = self.root.parent / "remote.git"
+        self.run_in_repo("git", "init", "-q", "--bare", str(bare))
+        self.run_in_repo("git", "remote", "add", "origin", str(bare))
+        self.assertEqual(self.push("refs/heads/main")[0], 0)
+        self.assertEqual(self.install(*options)[0], 0)
+
+    def test_the_installer_writes_a_pre_push_hook_in_each_mode(self) -> None:
+        hook = self.root / ".git" / "hooks" / "pre-push"
+        code, output = self.install()
+        self.assertEqual(code, 0)
+        self.assertIn("Installed the privacy-gate pre-push hook.", output)
+        self.assertIn("--pre-push --require-denylist", hook.read_text())
+        self.assertEqual(self.install("--generic-only")[0], 0)
+        self.assertIn("--pre-push --generic-only", hook.read_text())
+        self.assertTrue(os.access(hook, os.X_OK))
+
+    def test_a_term_added_then_removed_is_stopped_before_it_leaves(self) -> None:
+        self.start()
+        self.commit(PLAN)
+        self.commit("fine\n")
+        code, output = self.push("refs/heads/topic")
+        self.assertNotEqual(code, 0, output)
+        self.assertIn("notes.md:1 term#2", output)
+        self.assertFalse(self.remote_has("topic"))
+
+    def test_a_term_in_a_commit_message_is_stopped(self) -> None:
+        self.start()
+        self.commit("fine\n", "docs: the zorblax plan")
+        code, output = self.push("refs/heads/topic")
+        self.assertNotEqual(code, 0, output)
+        self.assertIn("<message>:1 term#2", output)
+
+    def test_a_cherry_picked_leak_is_stopped(self) -> None:
+        self.start()
+        self.run_in_repo("git", "checkout", "-q", "-b", "side")
+        self.commit(PLAN)
+        self.run_in_repo("git", "checkout", "-q", "-")
+        code, output = self.run_in_repo("git", "cherry-pick", "side")
+        self.assertEqual(code, 0, output)
+        code, output = self.push("refs/heads/main")
+        self.assertNotEqual(code, 0, output)
+        self.assertIn("notes.md:1 term#2", output)
+
+    def test_a_clean_push_goes_through_though_the_remote_holds_an_old_hit(
+        self,
+    ) -> None:
+        self.start(PLAN)
+        (self.root / "other.md").write_text("fine\n")
+        self.run_in_repo("git", "add", "other.md")
+        self.run_in_repo("git", "commit", "-q", "--no-verify", "-m", "docs: other")
+        code, output = self.push("refs/heads/main")
+        self.assertEqual(code, 0, output)
+
+    def test_deleting_a_remote_branch_is_not_scanned(self) -> None:
+        self.start()
+        self.assertEqual(self.push("refs/heads/topic")[0], 0)
+        code, output = self.run_in_repo("git", "push", "origin", ":topic")
+        self.assertEqual(code, 0, output)
+
+    def test_the_opt_out_hook_skips_the_denylist_but_not_the_generic_checks(
+        self,
+    ) -> None:
+        self.start("fine\n", "--generic-only")
+        self.commit(PLAN)
+        code, output = self.push("refs/heads/topic")
+        self.assertEqual(code, 0, output)
+        self.assertIn("generic checks only", output)
+        self.commit("mail jane" + "@" + "corp.org\n")
+        code, output = self.push("refs/heads/topic")
+        self.assertNotEqual(code, 0, output)
+        self.assertIn("notes.md:1 email", output)
+
+    def test_without_a_denylist_the_hook_stops_the_push_and_says_what_to_do(
+        self,
+    ) -> None:
+        self.start()
+        self.commit("fine too\n")
+        self.env["HC2_PRIVACY_DENYLIST"] = str(self.denylist.parent / "nope.txt")
+        code, output = self.push("refs/heads/topic")
+        self.assertNotEqual(code, 0, output)
+        self.assertIn("deny-list file not found", output)
+        self.assertIn("make hooks GENERIC_ONLY=1", output)
+        self.assertFalse(self.remote_has("topic"))
 
 
 if __name__ == "__main__":

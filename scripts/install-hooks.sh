@@ -1,6 +1,9 @@
 #!/bin/sh
 # Install the git hooks that run the privacy gate: pre-commit scans the staged
-# files and the commit identity, and commit-msg scans the commit message.
+# files and the commit identity, commit-msg scans the commit message, and
+# pre-push scans every commit the push would send (the message, author, file
+# names and added lines), including commits that never passed through
+# pre-commit, such as a cherry-pick or a merge.
 # Run it with `make hooks`. It never overwrites a hook it did not write.
 #
 # The hooks need your personal deny-list: with none, or an empty one, they stop
@@ -41,11 +44,12 @@ HOOK
 
 install_hook pre-commit "--check-identity --staged $flag"
 install_hook commit-msg "--message \"\$1\" $flag"
+install_hook pre-push "--pre-push $flag"
 
 if [ "$flag" = "--generic-only" ]; then
   echo "NOTICE: your personal deny-list is not checked by these hooks." >&2
 else
-  echo "These hooks stop a commit when your deny-list is missing or empty."
+  echo "These hooks stop a commit or a push when your deny-list is missing or empty."
   echo "With no deny-list, run: make hooks GENERIC_ONLY=1"
 fi
 exit "$failed"

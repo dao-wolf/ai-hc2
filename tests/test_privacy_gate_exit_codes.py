@@ -120,6 +120,21 @@ class EmptyDenylistTests(unittest.TestCase):
         self.assertEqual((code, out), (2, ""))
         self.assertIn("no terms", err)
 
+    def test_the_refusal_names_the_next_step(self) -> None:
+        for how in ("empty", "missing"):
+            with self.subTest(how=how), tempfile.TemporaryDirectory() as tmp:
+                root, deny = setup_repo(tmp, "all good\n")
+                if how == "empty":
+                    deny.write_text("# only a comment\n")
+                else:
+                    deny.unlink()
+                code, out, err = run_gate(
+                    "--root", str(root), "--denylist", str(deny), "--require-denylist"
+                )
+                self.assertEqual((code, out), (2, ""))
+                self.assertIn("CONTRIBUTING.md", err)
+                self.assertIn("make hooks GENERIC_ONLY=1", err)
+
     def test_an_empty_deny_list_is_allowed_when_it_is_not_required(self) -> None:
         code, _, err = self.run_with_comments_only()
         self.assertEqual(code, 0)

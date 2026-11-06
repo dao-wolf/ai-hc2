@@ -83,6 +83,7 @@ class HookRepoTestCase(unittest.TestCase):
         (self.root / "scripts").mkdir(parents=True)
         for name in ["privacy_gate.py", "install-hooks.sh"]:
             shutil.copy(SCRIPT.parent / name, self.root / "scripts")
+        shutil.copy(SCRIPT.parent.parent / "Makefile", self.root)
         self.denylist = Path(tmp.name) / "denylist.txt"
         self.denylist.write_text(DENYLIST)
         email = "alice" + AT + "example.com"
@@ -110,3 +111,6 @@ class HookRepoTestCase(unittest.TestCase):
 
     def install(self, *options: str) -> tuple[int, str]:
         return self.run_in_repo("sh", "scripts/install-hooks.sh", *options)
+
+    def make(self, *arguments: str) -> tuple[int, str]:
+        return self.run_in_repo("make", "-s", *arguments)
