@@ -13,12 +13,13 @@ import io
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
-from privacy_gate_helpers import AT, DENYLIST, gate, run_gate
+from privacy_gate_helpers import AT, DENYLIST, SCRIPT, gate, run_gate
 
 SUMMARY_RE = re.compile(r"^privacy gate: scanned .*, \d+ hits\.$", re.MULTILINE)
 ZEROS = "0" * 40
@@ -75,6 +76,28 @@ class RangeRepoTestCase(unittest.TestCase):
         self.git("add", "-A")
         self.git("commit", "-q", "--allow-empty", "-m", message, extra_env=extra_env)
         return self.git("rev-parse", "HEAD")
+
+    def raw_commit(self, ident: bytes, message: bytes) -> str:
+        """Make a commit from raw bytes, as git's own commands never would, and
+        move the branch to it. Returns its id.
+        """
+
+        def hash_object(kind: str, content: bytes) -> str:
+            command = ["git", "-C", str(self.root), "hash-object", "-w", "--literally"]
+            command += ["-t", kind, "--stdin"]
+            done = subprocess.run(
+                command, input=content, env=self.env, capture_output=True, check=True
+            )
+            return done.stdout.decode().strip()
+
+        tree = hash_object("tree", b"")
+        parent = self.git("rev-parse", "HEAD")
+        ident += b" 1700000000 +0000"
+        body = f"tree {tree}\nparent {parent}\n".encode()
+        body += b"author " + ident + b"\ncommitter " + ident + b"\n\n" + message
+        commit = hash_object("commit", body)
+        self.git("update-ref", "HEAD", commit)
+        return commit
 
     def arguments(self, *extra: str) -> list[str]:
         return ["--root", str(self.root), "--denylist", str(self.denylist), *extra]
@@ -256,6 +279,162 @@ class RangeFailureTests(RangeRepoTestCase):
         self.assertRegex(allowed[2], SUMMARY_RE)
 
 
+class RangeDetailTests(RangeRepoTestCase):
+    """Edge cases of reading commits, one behaviour each."""
+
+    def scan(self, spec: str, *extra: str) -> tuple[int, str, str]:
+        return self.scan_range(spec, *extra)
+
+    def test_every_file_of_a_commit_is_read_and_counted(self) -> None:
+        base = self.commit({"notes.md": "fine\n"})
+        leak = self.commit(
+            {
+                "a.md": "fine\n",
+                "b.md": "zorblax in b\n",
+                "c.md": "fine\nzorblax in c\n",
+                "image.bin": b"\0\1",
+                "image2.bin": b"\0\2",
+            }
+        )
+        code, out, err = self.scan(f"{base}..HEAD")
+        self.assertEqual(code, 1)
+        self.assertEqual(
+            out.splitlines(),
+            [f"{short(leak)}:b.md:1 term#2", f"{short(leak)}:c.md:2 term#2"],
+        )
+        self.assertIn("scanned 1 commits, 3 files, skipped 2, 2 hits", err)
+
+    def test_a_submodule_entry_is_left_alone(self) -> None:
+        base = self.commit({"notes.md": "fine\n"})
+        self.git("update-index", "--add", "--cacheinfo", f"160000,{'1' * 40},sub")
+        self.git("commit", "-q", "-m", "docs: add a submodule")
+        self.assertIn("sub", self.git("ls-files"))
+        code, out, err = self.scan(f"{base}..HEAD")
+        self.assertEqual((code, out), (0, ""))
+        self.assertIn("scanned 1 commits, 0 files", err)
+
+    def test_a_line_that_was_already_there_is_not_read_again(self) -> None:
+        base = self.commit({"notes.md": "zorblax\nzorblax\nfine\n"})
+        self.commit({"notes.md": "zorblax\nzorblax\nfine\nmore\n"})
+        self.assertEqual(self.scan(f"{base}..HEAD")[:2], (0, ""))
+        leak = self.commit({"notes.md": "zorblax\nzorblax\nzorblax\nfine\nmore\n"})
+        code, out, _ = self.scan(f"{base}..HEAD")
+        self.assertEqual(code, 1)
+        self.assertIn(f"{short(leak)}:notes.md:3 term#2", out)
+
+    def test_a_file_of_exactly_the_limit_is_scanned(self) -> None:
+        base = self.commit({"notes.md": "fine\n"})
+        self.commit({"edge.txt": "x" * LIMIT})
+        with mock.patch.object(gate, "MAX_BYTES", LIMIT):
+            code, _, err = self.scan(f"{base}..HEAD")
+        self.assertEqual(code, 0)
+        self.assertIn("scanned 1 commits, 1 files, skipped 0", err)
+
+    def test_a_skipped_large_file_counts_as_one_skip(self) -> None:
+        base = self.commit({"notes.md": "fine\n"})
+        self.commit({"big.txt": "x" * (LIMIT + 1)})
+        with mock.patch.object(gate, "MAX_BYTES", LIMIT):
+            _, _, err = self.scan(f"{base}..HEAD", "--allow-skipped")
+        self.assertIn("skipped 1, 0 hits", err)
+
+    def test_a_new_file_is_read_in_full_and_so_is_one_that_replaces_a_binary(
+        self,
+    ) -> None:
+        terms = gate.parse_terms("XXXX\n")
+        base = self.commit({"image.bin": b"\0\1\2"})
+        first = self.commit({"new.txt": "XXXX\n"})
+        second = self.commit({"image.bin": "XXXX\n"})
+        self.assertEqual(
+            [str(h) for h in gate.scan_commit(self.root, first, terms).hits],
+            [f"{short(first)}:new.txt:1 term#1"],
+        )
+        self.assertEqual(
+            [str(h) for h in gate.scan_commit(self.root, second, terms).hits],
+            [f"{short(second)}:image.bin:1 term#1"],
+        )
+        self.assertTrue(base)
+
+    def test_a_message_is_read_past_its_first_paragraph_break(self) -> None:
+        base = self.commit({"notes.md": "fine\n"})
+        leak = self.commit({"a.md": "1\n"}, "the zorblax plan\n\nmore text\n\nlast\n")
+        code, out, _ = self.scan(f"{base}..HEAD")
+        self.assertEqual(code, 1)
+        self.assertEqual(out.splitlines(), [f"{short(leak)}:<message>:1 term#2"])
+
+    def test_text_that_is_not_utf8_in_a_message_or_name_does_not_stop_the_scan(
+        self,
+    ) -> None:
+        base = self.commit({"notes.md": "fine\n"})
+        self.raw_commit(b"alice\xff <alice@example.com>", b"docs: caf\xe9\n")
+        code, out, err = self.scan(f"{base}..HEAD")
+        self.assertEqual((code, out), (0, ""))
+        self.assertIn("scanned 1 commits", err)
+
+    def test_a_term_in_the_email_is_found_though_the_name_holds_a_bracket(
+        self,
+    ) -> None:
+        base = self.commit({"notes.md": "fine\n"})
+        leak = self.raw_commit(b"x>y <zorblax@example.com>", b"docs: change\n")
+        code, out, _ = self.scan(f"{base}..HEAD")
+        self.assertEqual(code, 1)
+        self.assertIn(f"{short(leak)}:<author>:1 term#2", out)
+
+    def test_the_author_is_read_as_name_and_email_only(self) -> None:
+        base = self.commit({"notes.md": "fine\n"})
+        head = self.commit({"a.md": "1\n"})
+        idents, message = gate.commit_idents_and_message(self.root, head)
+        self.assertEqual(
+            idents,
+            [
+                ("author", "alice <alice" + AT + "example.com>"),
+                ("committer", "alice <alice" + AT + "example.com>"),
+            ],
+        )
+        self.assertEqual(message, "docs: change\n")
+        self.assertTrue(base)
+
+    def test_git_failing_to_read_a_commit_raises_instead_of_looking_clean(
+        self,
+    ) -> None:
+        self.commit({"notes.md": "fine\n"})
+        missing = "1" * 40
+        for read in (gate.commit_changes, gate.commit_idents_and_message):
+            with (
+                self.subTest(read=read.__name__),
+                self.assertRaises(subprocess.CalledProcessError),
+            ):
+                read(self.root, missing)
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            self.assertRaises(subprocess.CalledProcessError),
+        ):
+            gate.read_objects(Path(tmp), [b"1" * 40])
+
+    def test_the_refusals_say_what_is_wrong(self) -> None:
+        self.commit({"notes.md": "fine\n"})
+        code, _, err = self.scan("HEAD")
+        self.assertEqual(code, 2)
+        self.assertIn(
+            "privacy gate: --range needs BASE..HEAD (two refs joined by '..').",
+            err.splitlines(),
+        )
+
+
+class ObjectIdTests(unittest.TestCase):
+    def test_only_a_run_of_zeros_is_the_zero_id(self) -> None:
+        self.assertTrue(gate.is_zero_id(b"0" * 40))
+        self.assertTrue(gate.is_zero_id("0" * 64))
+        for not_zero in (b"0" * 39 + b"1", "0" * 39 + "1", b"0X0", "0X0", b"00X0"):
+            with self.subTest(value=not_zero):
+                self.assertFalse(gate.is_zero_id(not_zero))
+
+    def test_added_text_keeps_new_lines_and_blanks_the_old_ones(self) -> None:
+        self.assertEqual(gate.added_text("a\nb", "a\nc\nb"), "\nc\n")
+        self.assertEqual(gate.added_text("a\na", "a\na\na"), "\n\na")
+        self.assertEqual(gate.added_text("a", "a\na"), "\na")
+        self.assertEqual(gate.added_text("", "x\ny"), "x\ny")
+
+
 class PrePushTests(RangeRepoTestCase):
     def pre_push(
         self, *lines: str, extra: tuple[str, ...] = ()
@@ -306,6 +485,19 @@ class PrePushTests(RangeRepoTestCase):
         self.assertEqual(code, 1)
         self.assertEqual(out.splitlines(), [f"{short(leak)}:a.md:1 term#2"])
 
+    def test_an_unknown_remote_tip_is_handled_without_noise(self) -> None:
+        base = self.commit({"notes.md": "fine\n"})
+        self.git("update-ref", "refs/remotes/origin/main", base)
+        head = self.commit({"a.md": "fine\n"})
+        done = subprocess.run(
+            [sys.executable, str(SCRIPT), *self.arguments("--pre-push")],
+            input=self.update(head, "1" * 40) + "\n",
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertNotIn("fatal", done.stderr)
+
     def test_deleting_a_branch_scans_nothing(self) -> None:
         base = self.commit({"notes.md": "zorblax\n"})
         code, out, err = self.pre_push(self.update(ZEROS, base))
@@ -326,12 +518,26 @@ class PrePushTests(RangeRepoTestCase):
         self.assertEqual(code, 0)
         self.assertIn("scanned 1 commits", err)
 
+    def test_a_blank_line_is_skipped_and_a_delete_does_not_hide_later_refs(
+        self,
+    ) -> None:
+        base = self.commit({"notes.md": "fine\n"})
+        leak = self.commit({"a.md": "zorblax\n"})
+        delete = "refs/heads/old " + ZEROS + " refs/heads/old " + base
+        code, out, _ = self.pre_push("", delete, self.update(leak, base))
+        self.assertEqual(code, 1)
+        self.assertEqual(out.splitlines(), [f"{short(leak)}:a.md:1 term#2"])
+
     def test_a_line_git_would_not_send_exits_2(self) -> None:
         self.commit({"notes.md": "fine\n"})
         for line in ("nonsense", "a b c", "refs/heads/x --all refs/heads/x " + ZEROS):
             with self.subTest(line=line):
                 code, out, err = self.pre_push(line)
                 self.assertEqual((code, out), (2, ""))
+                self.assertIn(
+                    "privacy gate: could not read the refs git is pushing.",
+                    err.splitlines(),
+                )
                 self.assertNotRegex(err, SUMMARY_RE)
 
 
