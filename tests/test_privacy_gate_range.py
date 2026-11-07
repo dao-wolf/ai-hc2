@@ -345,11 +345,11 @@ class RangeDetailTests(RangeRepoTestCase):
         first = self.commit({"new.txt": "XXXX\n"})
         second = self.commit({"image.bin": "XXXX\n"})
         self.assertEqual(
-            [str(h) for h in gate.scan_commit(self.root, first, terms).hits],
+            [str(h) for h in gate.scan_commit(self.root, first, terms, False).hits],
             [f"{short(first)}:new.txt:1 term#1"],
         )
         self.assertEqual(
-            [str(h) for h in gate.scan_commit(self.root, second, terms).hits],
+            [str(h) for h in gate.scan_commit(self.root, second, terms, False).hits],
             [f"{short(second)}:image.bin:1 term#1"],
         )
         self.assertTrue(base)
