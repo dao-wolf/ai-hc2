@@ -17,8 +17,10 @@ author or committer is shown as `<message>`, `<author>` or `<committer>` in
 place of the file; a ref name, tag message or tagger shows as `<ref>`,
 `<tag message>` or `<tagger>`. --trust-author-emails (CI) skips the generic
 email check on the author and committer of each commit, because an outside
-contributor's own address is not a leak; the deny-list still checks them. Two
-sets of checks run:
+contributor's own address is not a leak; the deny-list and the other generic
+checks still run on them. A push that sends a ref whose final target is not a
+commit (a tag on a file or a tree) exits 2, because the gate could read nothing
+in it. Two sets of checks run:
 
 1. A personal deny-list that lives outside the repo. Its path comes from the
    environment variable HC2_PRIVACY_DENYLIST, and defaults to
@@ -30,8 +32,9 @@ Matching is case-insensitive. A term made only of letters, digits and spaces
 matches whole words, so "Sam" does not match "sample". A term with any
 other character (/ . - and so on) matches as a substring. In both, a space,
 hyphen or underscore between words matches any run of them, line breaks
-included, so "Example Person" also matches "example-person". A hit is reported
-on the line where the match starts.
+included, so "Example Person" also matches "example-person". In a file or ref
+name a slash or a dot also counts, so it matches "example/person.md". A hit is
+reported on the line where the match starts.
 
 Output is one line per hit: `file:line term#N`. N is the term's line number in
 the deny-list file. The term itself is never printed, and neither is the text
@@ -59,7 +62,7 @@ import re
 import subprocess
 import sys
 from collections import Counter
-from collections.abc import Callable, Iterable, Iterator, Sequence, Set
+from collections.abc import Callable, Container, Iterable, Iterator, Sequence, Set
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -76,6 +79,8 @@ TEXT_BOMS = (
 )
 BINARY_CHECK_BYTES = 8192
 SEPARATORS = r"[\s_-]+"
+# In a file or ref name a slash or a dot also splits words, as in a/b or a.b.md.
+NAME_SEPARATORS = r"[\s_./-]+"
 # Only a separator between two other characters is loosened. A loose one at the
 # start of a term would make the search slow on a long run of hyphens.
 BETWEEN_WORDS_RE = re.compile(rf"(?<=[^\s_-]){SEPARATORS}(?=[^\s_-])")
@@ -88,6 +93,7 @@ ALLOWED_EMAIL_DOMAINS = {"example.com", "users.noreply.github.com"}
 ALLOWED_EMAIL_SUFFIX = ".example.com"
 # GitHub's own addresses: the one in ssh clone URLs, and the one that bots such
 # as Dependabot put in a Signed-off-by trailer.
+EMAIL_LABEL = "email"
 ALLOWED_GITHUB_LOCALS = {"git", "support"}
 
 HOME_PATH_RE = re.compile(r"(?<![\w.~-])/(?:Users|home)/([A-Za-z0-9._-]+)")
@@ -200,16 +206,18 @@ class Term:
 
     number: int
     pattern: re.Pattern[str]
+    name_pattern: re.Pattern[str]
 
 
-def compile_term(term: str) -> re.Pattern[str]:
+def compile_term(term: str, separators: str = SEPARATORS) -> re.Pattern[str]:
     """Whole-word match for letters, digits and spaces; substring otherwise.
 
     Each run of spaces, hyphens or underscores between the term's words matches
-    any such run in the text, line breaks included.
+    any such run in the text, line breaks included. `separators` says what a
+    run may hold: names add slashes and dots.
     """
     parts = BETWEEN_WORDS_RE.split(term)
-    body = SEPARATORS.join(re.escape(part) for part in parts)
+    body = separators.join(re.escape(part) for part in parts)
     if all(ch.isalnum() or ch == " " for ch in term):
         # [^\W_] is "a letter or digit", so an underscore counts as a separator.
         return re.compile(rf"(?<![^\W_]){body}(?![^\W_])", re.IGNORECASE)
@@ -222,7 +230,8 @@ def parse_terms(text: str) -> list[Term]:
     for number, raw in enumerate(text.lstrip("﻿").split("\n"), start=1):
         term = raw.strip()
         if term and not term.startswith("#"):
-            terms.append(Term(number, compile_term(term)))
+            name = compile_term(term, NAME_SEPARATORS)
+            terms.append(Term(number, compile_term(term), name))
     return terms
 
 
@@ -270,7 +279,7 @@ def generic_labels(line: str) -> list[str]:
     """Labels of every generic check that the line trips."""
     labels: list[str] = []
     if any(not _email_allowed(m) for m in EMAIL_RE.finditer(line)):
-        labels.append("email")
+        labels.append(EMAIL_LABEL)
     if _has_personal_home_path(line):
         labels.append("home-path")
     labels.extend(label for label, rx in SECRET_PATTERNS if rx.search(line))
@@ -311,9 +320,11 @@ def scan_text(
     terms: Sequence[Term],
     generic: bool = True,
     added: Set[int] | None = None,
+    skip: Container[str] = (),
 ) -> list[Hit]:
     """Scan one file's text. Each (line, label) pair is reported once. With
-    `added`, a hit counts only if it touches one of those lines.
+    `added`, a hit counts only if it touches one of those lines. Generic labels
+    in `skip` are not reported.
     """
     hits = {
         Hit(path, line, f"term#{term.number}")
@@ -323,13 +334,16 @@ def scan_text(
     if generic:
         for number, line in enumerate(text.split("\n"), start=1):
             if added is None or number in added:
-                hits.update(Hit(path, number, label) for label in generic_labels(line))
+                labels = generic_labels(line)
+                hits.update(Hit(path, number, k) for k in labels if k not in skip)
     return sorted(hits)
 
 
 def scan_name(path: str, terms: Sequence[Term]) -> list[Hit]:
     """Check a file's own path against the deny-list."""
-    return [Hit(path, 0, f"term#{t.number}") for t in terms if t.pattern.search(path)]
+    return [
+        Hit(path, 0, f"term#{t.number}") for t in terms if t.name_pattern.search(path)
+    ]
 
 
 def list_files(root: Path) -> list[str]:
@@ -641,13 +655,15 @@ def scan_commit(
     root: Path, commit: str, terms: Sequence[Term], trust_idents: bool = False
 ) -> ScanResult:
     """Scan one commit: its message, author, committer and added lines. With
-    `trust_idents` the generic checks skip the author and committer.
+    `trust_idents` the email check is skipped for the author and committer;
+    every other check still runs on them.
     """
     prefix = commit[:COMMIT_ID_SHORT]
     idents, message = commit_idents_and_message(root, commit)
     hits = scan_text("<message>", message, terms)
+    skip = (EMAIL_LABEL,) if trust_idents else ()
     for role, ident in idents:
-        hits.extend(scan_text(f"<{role}>", ident, terms, generic=not trust_idents))
+        hits.extend(scan_text(f"<{role}>", ident, terms, skip=skip))
     changes = commit_changes(root, commit)
     wanted = [c.new_id for c in changes]
     wanted += [i for c in changes for i in c.old_ids if not is_zero_id(i)]
@@ -756,7 +772,8 @@ def pushed_ref_hits(
     root: Path, pushes: Iterable[Push], terms: Sequence[Term]
 ) -> list[Hit]:
     """The deny-list hits in what a push names rather than holds: ref names and
-    annotated tags. A deleted ref sends nothing.
+    annotated tags. A deleted ref sends nothing. A ref whose final target, after
+    any tags, is not a commit is refused: the scan could read nothing in it.
     """
     hits: list[Hit] = []
     for push in pushes:
@@ -765,6 +782,13 @@ def pushed_ref_hits(
         hits.extend(ref_hits(push.local_ref, terms))
         hits.extend(ref_hits(push.remote_ref, terms))
         hits.extend(tag_hits(root, push.local, terms))
+        if (
+            git_output(root, "cat-file", "-t", f"{push.local}^{{}}").strip()
+            != b"commit"
+        ):
+            raise ScanError(
+                "privacy gate: a ref points at something that is not a commit."
+            )
     return hits
 
 
@@ -808,8 +832,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--trust-author-emails",
         action="store_true",
         help="with --range or --pre-push, skip the generic email check on the "
-        "author and committer of each commit; the deny-list still checks them "
-        "(CI passes this, because an outside contributor's address is no leak)",
+        "author and committer of each commit; the deny-list and the other "
+        "generic checks still run on them (CI passes this, because an outside "
+        "contributor's address is no leak)",
     )
     parser.add_argument(
         "--check-identity",
