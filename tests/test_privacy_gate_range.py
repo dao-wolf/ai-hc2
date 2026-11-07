@@ -410,6 +410,21 @@ class RangeDetailTests(RangeRepoTestCase):
         ):
             gate.read_objects(Path(tmp), [b"1" * 40])
 
+    def test_asking_whether_a_commit_exists_prints_nothing(self) -> None:
+        head = self.commit({"notes.md": "fine\n"})
+        with tempfile.TemporaryFile() as noise:
+            saved = os.dup(2)
+            os.dup2(noise.fileno(), 2)
+            try:
+                known = gate.has_commit(self.root, head)
+                unknown = gate.has_commit(self.root, "1" * 40)
+            finally:
+                os.dup2(saved, 2)
+                os.close(saved)
+            noise.seek(0)
+            printed = noise.read()
+        self.assertEqual((known, unknown, printed), (True, False, b""))
+
     def test_the_refusals_say_what_is_wrong(self) -> None:
         self.commit({"notes.md": "fine\n"})
         code, _, err = self.scan("HEAD")
