@@ -107,6 +107,39 @@ class TermMatchingTests(unittest.TestCase):
         hits = gate.scan_name("docs/zorblax-notes.md", terms)
         self.assertEqual([(h.line, h.label) for h in hits], [(0, "term#2")])
 
+    def test_a_slash_or_dot_between_a_terms_words_is_a_separator_in_a_name(
+        self,
+    ) -> None:
+        terms = gate.parse_terms(DENYLIST)
+        for name in (
+            "docs/quentin/example.md",
+            "docs/quentin.example.md",
+            "quentin/-example/x",
+            "docs/quentin_example/x",
+            "docs/Quentin Example.md",
+        ):
+            with self.subTest(name):
+                self.assertEqual(
+                    [(h.line, h.label) for h in gate.scan_name(name, terms)],
+                    [(0, "term#6")],
+                )
+
+    def test_a_name_that_only_looks_close_is_not_a_hit(self) -> None:
+        terms = gate.parse_terms(DENYLIST)
+        for name in (
+            "docs/quentinexample.md",
+            "docs/quentin/x/example.md",
+            "docs/xquentin/example.md",
+            "docs/quentin/examples.md",
+        ):
+            with self.subTest(name):
+                self.assertEqual(gate.scan_name(name, terms), [])
+
+    def test_a_slash_or_dot_is_not_a_separator_in_text(self) -> None:
+        terms = gate.parse_terms(DENYLIST)
+        self.assertEqual(gate.scan_text("a.md", "quentin/example\n", terms), [])
+        self.assertEqual(gate.scan_text("a.md", "quentin.example\n", terms), [])
+
     def test_a_byte_order_mark_is_ignored(self) -> None:
         terms = gate.parse_terms("﻿Zorblax\n")
         self.assertEqual(len(gate.scan_text("f", "zorblax", terms)), 1)

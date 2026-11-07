@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import subprocess
 from unittest import mock
 
 from privacy_gate_helpers import AT, DENYLIST, gate, run_gate
@@ -65,6 +66,28 @@ class BotAndOutsideAuthorTests(RangeRepoTestCase):
         code, out, _ = self.scan_range(f"{base}..HEAD", "--trust-author-emails")
         self.assertEqual(code, 1)
         self.assertEqual(out.splitlines(), [f"{short(commit)}:<author>:1 term#2"])
+
+    def test_trusting_author_emails_still_checks_a_key_or_home_path_in_a_name(
+        self,
+    ) -> None:
+        base = self.commit({"notes.md": "fine\n"})
+        key = "AKIA" + "ABCDEFGHIJKLMNOP"
+        names = {
+            "secret:aws-access-key-id": key,
+            "home-path": "see /Users" + "/jane/work",
+        }
+        for label, name in names.items():
+            with self.subTest(label=label):
+                env = {"GIT_AUTHOR_NAME": name, "GIT_COMMITTER_NAME": "alice"}
+                commit = self.commit({"a.md": f"{label}\n"}, extra_env=env)
+                code, out, _ = self.scan_range(
+                    f"{base}..HEAD", "--generic-only", "--trust-author-emails"
+                )
+                self.assertEqual(code, 1)
+                self.assertEqual(
+                    out.splitlines(), [f"{short(commit)}:<author>:1 {label}"]
+                )
+                self.git("reset", "-q", "--hard", base)
 
     def test_trusting_author_emails_leaves_the_message_checks_alone(self) -> None:
         base = self.commit({"notes.md": "fine\n"})
@@ -272,6 +295,99 @@ class PushedRefTests(RangeRepoTestCase):
         ref = "refs/tags/v1"
         code, out, _ = self.pre_push(f"{ref} {'1' * 40} {ref} {ZEROS}")
         self.assertEqual((code, out), (2, ""))
+
+    def not_a_commit_push(self, target: str, ref: str = "refs/tags/v1") -> str:
+        return f"{ref} {target} {ref} {ZEROS}"
+
+    def test_a_ref_that_points_at_a_file_or_a_tree_is_refused(self) -> None:
+        self.clean_commit()
+        blob = self.git("rev-parse", "HEAD:notes.md")
+        tree = self.git("rev-parse", "HEAD^{tree}")
+        self.git("tag", "-a", "annotated-blob", "-m", "x", blob)
+        self.git("tag", "-a", "annotated-tree", "-m", "x", tree)
+        self.git("tag", "-a", "outer", "-m", "x", "refs/tags/annotated-blob")
+        cases = {
+            "light tag on a file": blob,
+            "light tag on a tree": tree,
+            "annotated tag on a file": self.git("rev-parse", "annotated-blob"),
+            "annotated tag on a tree": self.git("rev-parse", "annotated-tree"),
+            "tag on a tag on a file": self.git("rev-parse", "outer"),
+        }
+        for name, target in cases.items():
+            with self.subTest(name):
+                code, out, err = self.pre_push(self.not_a_commit_push(target))
+                self.assertEqual((code, out), (2, ""))
+                self.assertIn(
+                    "privacy gate: a ref points at something that is not a commit.",
+                    err,
+                )
+                self.assertNotIn("scanned", err)
+
+    def test_the_refusal_is_not_hidden_by_a_hit_or_a_clean_commit_in_the_push(
+        self,
+    ) -> None:
+        head = self.clean_commit()
+        blob = self.git("rev-parse", "HEAD:notes.md")
+        code, out, _ = self.pre_push(
+            f"refs/heads/main {head} refs/heads/main {ZEROS}",
+            self.not_a_commit_push(blob, "refs/tags/zorblax"),
+        )
+        self.assertEqual((code, out), (2, ""))
+
+    def test_deleting_a_ref_that_points_at_a_file_still_passes(self) -> None:
+        self.clean_commit()
+        blob = self.git("rev-parse", "HEAD:notes.md")
+        code, out, err = self.pre_push(f"(delete) {ZEROS} refs/tags/v1 {blob}")
+        self.assertEqual((code, out), (0, ""))
+        self.assertIn("scanned 0 commits", err)
+
+    def test_a_branch_name_with_a_slash_between_a_terms_words_is_found(self) -> None:
+        head = self.clean_commit()
+        for name in ("quentin/example", "quentin.example", "quentin/-_example"):
+            with self.subTest(name):
+                ref = f"refs/heads/{name}"
+                code, out, _ = self.pre_push(f"{ref} {head} {ref} {ZEROS}")
+                self.assertEqual((code, out.splitlines()), (1, ["<ref>:0 term#6"]))
+
+    def test_the_name_stored_in_an_annotated_tag_is_checked_apart_from_its_ref(
+        self,
+    ) -> None:
+        self.clean_commit()
+        ref = "refs/tags/ok"
+        for name, label in (("zorblax-v1", "term#2"), ("quentin/example", "term#6")):
+            with self.subTest(name):
+                tag = self.tag(name, "release")
+                code, out, _ = self.pre_push(f"{ref} {tag} {ref} {ZEROS}")
+                self.assertEqual((code, out.splitlines()), (1, [f"<ref>:0 {label}"]))
+
+    def raw_tag(self, name: bytes, tagger: bytes, message: bytes) -> str:
+        """A tag object made from raw bytes, as git's own commands never would."""
+        body = b"object " + self.git("rev-parse", "HEAD").encode() + b"\ntype commit\n"
+        body += b"tag " + name + b"\ntagger " + tagger + b" 1700000000 +0000\n\n"
+        command = ["git", "-C", str(self.root), "hash-object", "-w", "--literally"]
+        command += ["-t", "tag", "--stdin"]
+        done = subprocess.run(
+            command, input=body + message, env=self.env, capture_output=True, check=True
+        )
+        return done.stdout.decode().strip()
+
+    def test_text_in_a_tag_that_is_not_utf8_does_not_stop_the_scan(self) -> None:
+        self.clean_commit()
+        email = b" <alice" + AT.encode() + b"example.com>"
+        tag = self.raw_tag(
+            b"\xff-zorblax", b"\xff alice" + email, b"\xff-quentin example\n"
+        )
+        ref = "refs/tags/ok"
+        code, out, _ = self.pre_push(f"{ref} {tag} {ref} {ZEROS}")
+        self.assertEqual(code, 1)
+        self.assertEqual(out.splitlines(), ["<ref>:0 term#2", "<tag message>:1 term#6"])
+
+    def test_a_tag_message_is_read_past_its_first_paragraph_break(self) -> None:
+        self.clean_commit()
+        tag = self.tag("v1", "intro\n\nmore\n\nthe zorblax plan")
+        ref = "refs/tags/v1"
+        code, out, _ = self.pre_push(f"{ref} {tag} {ref} {ZEROS}")
+        self.assertEqual((code, out.splitlines()), (1, ["<tag message>:5 term#2"]))
 
 
 class SplitMatchTests(RangeRepoTestCase):
