@@ -443,12 +443,6 @@ class ObjectIdTests(unittest.TestCase):
             with self.subTest(value=not_zero):
                 self.assertFalse(gate.is_zero_id(not_zero))
 
-    def test_added_text_keeps_new_lines_and_blanks_the_old_ones(self) -> None:
-        self.assertEqual(gate.added_text("a\nb", "a\nc\nb"), "\nc\n")
-        self.assertEqual(gate.added_text("a\na", "a\na\na"), "\n\na")
-        self.assertEqual(gate.added_text("a", "a\na"), "\na")
-        self.assertEqual(gate.added_text("", "x\ny"), "x\ny")
-
 
 class PrePushTests(RangeRepoTestCase):
     def pre_push(

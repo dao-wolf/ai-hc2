@@ -2,8 +2,9 @@
 # Install the git hooks that run the privacy gate: pre-commit scans the staged
 # files and the commit identity, commit-msg scans the commit message, and
 # pre-push scans every commit the push would send (the message, author, file
-# names and added lines), including commits that never passed through
-# pre-commit, such as a cherry-pick or a merge.
+# names and added lines) and the names of the refs and annotated tags, including
+# commits that never passed through pre-commit, such as a cherry-pick or what a
+# merge adds.
 # Run it with `make hooks`. It never overwrites a hook it did not write.
 #
 # The hooks need your personal deny-list: with none, or an empty one, they stop

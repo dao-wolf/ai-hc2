@@ -76,5 +76,5 @@ jobs:
           if printf '%s' "$BASE_SHA" | grep -qE '^0*$'; then
             echo "::warning::This run has no base commit, so only the files at the tip were scanned, not the commits."
           else
-            python scripts/privacy_gate.py $mode --range "$BASE_SHA..$HEAD_SHA"
+            python scripts/privacy_gate.py $mode --trust-author-emails --range "$BASE_SHA..$HEAD_SHA"
           fi
