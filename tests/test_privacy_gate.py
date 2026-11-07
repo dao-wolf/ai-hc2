@@ -126,6 +126,7 @@ class GenericCheckTests(unittest.TestCase):
             f"alice{AT}mail.example.com",
             f"12345+alice{AT}users.noreply.github.com",
             f"git{AT}github.com",
+            f"support{AT}github.com",
         ]
         for text in allowed:
             with self.subTest(text=text):
@@ -141,6 +142,7 @@ class GenericCheckTests(unittest.TestCase):
             f"zed{AT}github.com",
             f"git{AT}gitlab.com",
             f"git{AT}example.org",
+            f"support{AT}gitlab.com",
         ]:
             with self.subTest(text=text):
                 self.assertEqual(labels(text), ["email"])
