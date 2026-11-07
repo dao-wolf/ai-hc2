@@ -48,6 +48,42 @@ class CommitIdentityTests(unittest.TestCase):
                 found = [(h.path, h.line, h.label) for h in hits]
                 self.assertEqual(found, [("<git committer>", 1, "term#6")])
 
+    def idents(
+        self, stdout: bytes, terms: str = DENYLIST
+    ) -> list[tuple[str, int, str]]:
+        done = subprocess.CompletedProcess([], 0, stdout=stdout)
+        with mock.patch.object(gate.subprocess, "run", return_value=done):
+            hits = gate.scan_identity(Path("."), gate.parse_terms(terms))
+        return [(h.path, h.line, h.label) for h in hits]
+
+    def test_only_the_name_and_email_are_read_not_the_time_stamp(self) -> None:
+        ident = b"alice <alice" + AT.encode() + b"example.com> 1700000000 +0000"
+        self.assertEqual(self.idents(ident, "1700000000\n"), [])
+
+    def test_a_term_in_the_email_is_found_though_the_name_holds_a_bracket(
+        self,
+    ) -> None:
+        ident = b"x>y <zorblax" + AT.encode() + b"example.com> 1700000000 +0000"
+        expected = [("<git author>", 1, "term#2"), ("<git committer>", 1, "term#2")]
+        self.assertEqual(self.idents(ident), expected)
+
+    def test_a_name_that_is_not_utf8_does_not_stop_the_check(self) -> None:
+        ident = b"\xff Zorblax <alice" + AT.encode() + b"example.com> 1 +0000"
+        expected = [("<git author>", 1, "term#2"), ("<git committer>", 1, "term#2")]
+        self.assertEqual(self.idents(ident), expected)
+
+    def test_a_lookup_that_fails_is_skipped_not_read_as_an_empty_identity(self) -> None:
+        def fail_as_git_does(
+            command: list[str], **options: object
+        ) -> subprocess.CompletedProcess[bytes]:
+            if options.get("check") is True:
+                raise subprocess.CalledProcessError(128, command)
+            return subprocess.CompletedProcess(command, 128, stdout=b"")
+
+        terms = gate.parse_terms(">\n")
+        with mock.patch.object(gate.subprocess, "run", side_effect=fail_as_git_does):
+            self.assertEqual(gate.scan_identity(Path("."), terms), [])
+
 
 if __name__ == "__main__":
     unittest.main()
