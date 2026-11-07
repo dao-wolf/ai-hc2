@@ -491,7 +491,7 @@ def commit_changes(root: Path, commit: str) -> list[Change]:
     fields = out.split(b"\0")
     changes: list[Change] = []
     for info, name in zip(fields[0::2], fields[1::2], strict=False):
-        _old_mode, new_mode, old_id, new_id, status = info.lstrip(b":").split()
+        _old_mode, new_mode, old_id, new_id, status = info.split()
         if status != b"D" and new_mode != b"160000":
             changes.append(Change(os.fsdecode(name), old_id, new_id))
     return changes
