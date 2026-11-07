@@ -13,7 +13,7 @@ import subprocess
 from unittest import mock
 
 from privacy_gate_helpers import AT, DENYLIST, gate, run_gate
-from test_privacy_gate_range import ZEROS, RangeRepoTestCase, short
+from test_privacy_gate_range import LIMIT, ZEROS, RangeRepoTestCase, short
 
 OUTSIDE = "jane" + AT + "corp.org"
 BOT_TRAILER = "Signed-off-by: dependabot[bot] <support" + AT + "github.com>"
@@ -109,9 +109,9 @@ class BotAndOutsideAuthorTests(RangeRepoTestCase):
             ):
                 gate.main(self.arguments("--trust-author-emails", *other))
             self.assertEqual(raised.exception.code, 2)
-            self.assertIn(
-                "--trust-author-emails needs --range or --pre-push", shown.getvalue()
-            )
+            expected = "error: --trust-author-emails needs --range or --pre-push"
+            lines = shown.getvalue().splitlines()
+            self.assertTrue(any(line.endswith(expected) for line in lines))
 
     def test_the_option_is_accepted_with_a_push(self) -> None:
         self.commit({"notes.md": "fine\n"})
@@ -317,10 +317,10 @@ class PushedRefTests(RangeRepoTestCase):
             with self.subTest(name):
                 code, out, err = self.pre_push(self.not_a_commit_push(target))
                 self.assertEqual((code, out), (2, ""))
-                self.assertIn(
-                    "privacy gate: a ref points at something that is not a commit.",
-                    err,
+                refusal = (
+                    "privacy gate: a ref points at something that is not a commit."
                 )
+                self.assertEqual(err.splitlines()[-1], refusal)
                 self.assertNotIn("scanned", err)
 
     def test_the_refusal_is_not_hidden_by_a_hit_or_a_clean_commit_in_the_push(
@@ -389,6 +389,21 @@ class PushedRefTests(RangeRepoTestCase):
         code, out, _ = self.pre_push(f"{ref} {tag} {ref} {ZEROS}")
         self.assertEqual((code, out.splitlines()), (1, ["<tag message>:5 term#2"]))
 
+    def test_a_delete_does_not_hide_the_refs_after_it(self) -> None:
+        head = self.clean_commit()
+        leak = "refs/heads/zorblax-plan"
+        code, out, _ = self.pre_push(
+            f"(delete) {ZEROS} refs/heads/gone {head}", f"{leak} {head} {leak} {ZEROS}"
+        )
+        self.assertEqual((code, out.splitlines()), (1, ["<ref>:0 term#2"]))
+
+    def test_a_line_git_gives_with_an_unreadable_old_tip_exits_2(self) -> None:
+        head = self.clean_commit()
+        ref = "refs/heads/topic"
+        code, out, err = self.pre_push(f"{ref} {head} {ref} not-an-id")
+        self.assertEqual((code, out), (2, ""))
+        self.assertIn("privacy gate: could not read the refs git is pushing.", err)
+
 
 class SplitMatchTests(RangeRepoTestCase):
     def test_a_term_split_across_an_old_line_and_a_new_one_is_found(self) -> None:
@@ -424,6 +439,39 @@ class SplitMatchTests(RangeRepoTestCase):
         code, out, _ = self.scan_range(f"{base}..HEAD", "--generic-only")
         self.assertEqual(code, 1)
         self.assertEqual(out.splitlines(), [f"{short(leak)}:notes.md:2 email"])
+
+    def test_a_match_on_an_old_line_stays_old_when_new_lines_follow_it(self) -> None:
+        base = self.commit({"a.md": "x\ny\nzorblax\n"})
+        self.commit({"a.md": "x\ny\nzorblax\nw\nv\n"})
+        code, out, _ = self.scan_range(f"{base}..HEAD")
+        self.assertEqual((code, out), (0, ""))
+
+
+class GitArgumentTests(RangeRepoTestCase):
+    def test_a_file_named_like_the_range_does_not_confuse_git(self) -> None:
+        base = self.commit({"notes.md": "fine\n"})
+        self.commit({"a.md": "zorblax\n"})
+        (self.root / f"{base}..HEAD").write_text("x")
+        code, out, _ = self.scan_range(f"{base}..HEAD")
+        self.assertEqual(code, 1)
+        self.assertEqual(len(out.splitlines()), 1)
+
+    def test_a_file_named_like_a_commit_does_not_confuse_git(self) -> None:
+        base = self.commit({"notes.md": "fine\n"})
+        head = self.commit({"a.md": "zorblax\n"})
+        (self.root / head).write_text("x")
+        code, out, _ = self.scan_range(f"{base}..HEAD")
+        self.assertEqual(code, 1)
+        self.assertEqual(out.splitlines(), [f"{short(head)}:a.md:1 term#2"])
+
+    def test_commits_are_read_oldest_first(self) -> None:
+        base = self.commit({"notes.md": "fine\n"})
+        first = self.commit({"first.txt": "x" * (LIMIT + 1)})
+        second = self.commit({"second.txt": "x" * (LIMIT + 1)})
+        with mock.patch.object(gate, "MAX_BYTES", LIMIT):
+            code, _, err = self.scan_range(f"{base}..HEAD", "--allow-skipped")
+        self.assertEqual(code, 0)
+        self.assertLess(err.index(short(first)), err.index(short(second)))
 
 
 class AddedLinesTests(RangeRepoTestCase):

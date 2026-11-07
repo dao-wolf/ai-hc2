@@ -550,7 +550,7 @@ def diff_tree(root: Path, *trees: str) -> list[Change]:
     Deleted files and submodules are left out.
     """
     flags = ["-r", "-z", "--root", "--no-renames", "--no-commit-id"]
-    fields = git_output(root, "diff-tree", *flags, *trees).split(b"\0")
+    fields = git_output(root, "diff-tree", *flags, *trees, "--").split(b"\0")
     changes: list[Change] = []
     for info, name in zip(fields[0::2], fields[1::2], strict=False):
         _old_mode, new_mode, old_id, new_id, status = info.split()
@@ -652,7 +652,7 @@ def scan_change(
 
 
 def scan_commit(
-    root: Path, commit: str, terms: Sequence[Term], trust_idents: bool = False
+    root: Path, commit: str, terms: Sequence[Term], trust_idents: bool
 ) -> ScanResult:
     """Scan one commit: its message, author, committer and added lines. With
     `trust_idents` the email check is skipped for the author and committer;
@@ -685,7 +685,7 @@ def scan_range(
     root: Path,
     selections: Sequence[Sequence[str]],
     terms: Sequence[Term],
-    trust_idents: bool = False,
+    trust_idents: bool,
 ) -> tuple[ScanResult, int]:
     """Scan every commit the selections name, each once. Returns the result and
     the number of commits.
