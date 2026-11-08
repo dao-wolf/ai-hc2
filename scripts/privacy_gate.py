@@ -50,21 +50,24 @@ any kind, exits 2, as does a file left unchecked for being too large. Exit 0
 and 1 happen only after the scan finished, and a finished scan ends with a
 summary line on stderr: `privacy gate: scanned ..., N hits.` A run that exits
 2 never prints that line.
-Standard library only.
+Standard library only. The generic checks live in privacy_gate_generic.py, beside
+this file.
 """
 
 from __future__ import annotations
 
 import argparse
 import codecs
+import importlib.util
 import os
 import re
 import subprocess
 import sys
 from collections import Counter
-from collections.abc import Callable, Container, Iterable, Iterator, Sequence, Set
+from collections.abc import Callable, Iterable, Iterator, Sequence, Set
 from dataclasses import dataclass
 from pathlib import Path
+from types import ModuleType
 
 ENV_DENYLIST = "HC2_PRIVACY_DENYLIST"
 DEFAULT_DENYLIST = "~/.config/ai-hc2/privacy-denylist.txt"
@@ -85,68 +88,26 @@ NAME_SEPARATORS = r"[\s_./-]+"
 # start of a term would make the search slow on a long run of hyphens.
 BETWEEN_WORDS_RE = re.compile(rf"(?<=[^\s_-]){SEPARATORS}(?=[^\s_-])")
 
-EMAIL_RE = re.compile(
-    r"[A-Za-z0-9._%+-]+@([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,})"
-)
-ALLOWED_EMAIL_LOCALS = {"noreply", "no-reply"}
-ALLOWED_EMAIL_DOMAINS = {"example.com", "users.noreply.github.com"}
-ALLOWED_EMAIL_SUFFIX = ".example.com"
-# GitHub's own addresses: the one in ssh clone URLs, and the one that bots such
-# as Dependabot put in a Signed-off-by trailer.
-EMAIL_LABEL = "email"
-ALLOWED_GITHUB_LOCALS = {"git", "support"}
 
-HOME_PATH_RE = re.compile(r"(?<![\w.~-])/(?:Users|home)/([A-Za-z0-9._-]+)")
-# A Windows home folder: drive letter, Users, then the name. With forward
-# slashes HOME_PATH_RE already matches.
-WINDOWS_HOME_RE = re.compile(r"(?<![\w.~-])[A-Za-z]:\\Users\\([A-Za-z0-9._-]+)")
-# A folder under the home shorthand (a tilde, $HOME or ${HOME} and a slash).
-# Hidden folders are where tools keep their settings, so they pass.
-TILDE_PATH_RE = re.compile(
-    r"(?<![\w.~/$-])(?:~|\$HOME|\$\{HOME\})/([A-Za-z0-9_][A-Za-z0-9._/-]*)"
-)
-# Folders that name no one: where an operating system keeps application data,
-# and placeholders. A single character such as x is one too. Only the first
-# folder counts: a personal folder with "example" further down is still personal.
-ALLOWED_HOME_FOLDERS = {
-    "applications",
-    "library",
-    "path",
-    "project",
-    "projects",
-    "repo",
-}
-MADE_UP_FOLDER_PREFIX = "example"
-ALLOWED_HOME_NAMES = {
-    "alice",
-    "bob",
-    "carol",
-    "dave",
-    "default",
-    "eve",
-    "example",
-    "me",
-    "name",
-    "public",
-    "runner",
-    "shared",
-    "user",
-    "username",
-    "you",
-    "yourname",
-}
+def load_sibling(stem: str) -> ModuleType:
+    """Load scripts/<stem>.py by its path. A hook or `python3 -I` leaves this
+    script's folder off sys.path, so a plain import would not find it.
+    """
+    name = f"scripts.{stem}"
+    if name not in sys.modules:
+        path = Path(__file__).resolve().parent / f"{stem}.py"
+        spec = importlib.util.spec_from_file_location(name, path)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"privacy gate: cannot load {stem}.py")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+    return sys.modules[name]
 
-SECRET_PATTERNS = (
-    ("secret:aws-access-key-id", re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b")),
-    (
-        "secret:github-token",
-        re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,})\b"),
-    ),
-    (
-        "secret:private-key",
-        re.compile(r"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----"),
-    ),
-)
+
+_generic = load_sibling("privacy_gate_generic")
+EMAIL_LABEL = _generic.EMAIL_LABEL
+generic_labels = _generic.generic_labels
 
 # `git commit -v` adds the diff below this line of the message file, and git
 # drops it from the message. The gate drops it too, or the diff of a commit
@@ -240,52 +201,6 @@ def load_denylist(path: Path) -> list[Term]:
     return parse_terms(path.read_text(encoding="utf-8"))
 
 
-def _email_allowed(match: re.Match[str]) -> bool:
-    local = match.group(0).rsplit("@", 1)[0].lower()
-    domain = match.group(1).lower()
-    return (
-        local in ALLOWED_EMAIL_LOCALS
-        or domain in ALLOWED_EMAIL_DOMAINS
-        or domain.endswith(ALLOWED_EMAIL_SUFFIX)
-        or (local in ALLOWED_GITHUB_LOCALS and domain == "github.com")
-    )
-
-
-def _folders_allowed(path: str) -> bool:
-    """Whether a path under the home shorthand names nothing personal."""
-    folders = path.lower().split("/")
-    first = folders[0]
-    return (
-        len(first) == 1
-        or first in ALLOWED_HOME_FOLDERS
-        or first.startswith(MADE_UP_FOLDER_PREFIX)
-    )
-
-
-def _has_personal_home_path(line: str) -> bool:
-    """A user name or a folder under the home shorthand that isn't made up."""
-    users = (
-        m.group(1).lower()
-        for rx in (HOME_PATH_RE, WINDOWS_HOME_RE)
-        for m in rx.finditer(line)
-    )
-    folders = (m.group(1) for m in TILDE_PATH_RE.finditer(line))
-    return any(u not in ALLOWED_HOME_NAMES for u in users) or any(
-        not _folders_allowed(f) for f in folders
-    )
-
-
-def generic_labels(line: str) -> list[str]:
-    """Labels of every generic check that the line trips."""
-    labels: list[str] = []
-    if any(not _email_allowed(m) for m in EMAIL_RE.finditer(line)):
-        labels.append(EMAIL_LABEL)
-    if _has_personal_home_path(line):
-        labels.append("home-path")
-    labels.extend(label for label, rx in SECRET_PATTERNS if rx.search(line))
-    return labels
-
-
 def touches(added: Set[int] | None, first: int, last: int) -> bool:
     """Whether any line from `first` to `last` is one that counts. None means
     every line does.
@@ -314,29 +229,44 @@ def match_lines(
         line += 1
 
 
-def scan_text(
-    path: str,
-    text: str,
-    terms: Sequence[Term],
-    generic: bool = True,
-    added: Set[int] | None = None,
-    skip: Container[str] = (),
-) -> list[Hit]:
-    """Scan one file's text. Each (line, label) pair is reported once. With
-    `added`, a hit counts only if it touches one of those lines. Generic labels
-    in `skip` are not reported.
+def term_hits(
+    path: str, text: str, terms: Sequence[Term], added: Set[int] | None = None
+) -> set[Hit]:
+    """The deny-list hits in a text. With `added`, a hit counts only if it
+    touches one of those lines.
     """
-    hits = {
+    return {
         Hit(path, line, f"term#{term.number}")
         for term in terms
         for line in match_lines(term.pattern, text, added)
     }
+
+
+def generic_hits(path: str, text: str, added: Set[int] | None = None) -> set[Hit]:
+    """The generic hits in a text, on `added` lines only if that is given."""
+    return {
+        Hit(path, number, label)
+        for number, line in enumerate(text.split("\n"), start=1)
+        if added is None or number in added
+        for label in generic_labels(line)
+    }
+
+
+def scan_text(
+    path: str, text: str, terms: Sequence[Term], generic: bool = True
+) -> list[Hit]:
+    """Scan one file's text. Each (line, label) pair is reported once."""
+    hits = term_hits(path, text, terms)
     if generic:
-        for number, line in enumerate(text.split("\n"), start=1):
-            if added is None or number in added:
-                labels = generic_labels(line)
-                hits.update(Hit(path, number, k) for k in labels if k not in skip)
+        hits |= generic_hits(path, text)
     return sorted(hits)
+
+
+def scan_added(
+    path: str, text: str, terms: Sequence[Term], added: Set[int]
+) -> list[Hit]:
+    """Scan only what the lines in `added` add, with every check."""
+    return sorted(term_hits(path, text, terms, added) | generic_hits(path, text, added))
 
 
 def scan_name(path: str, terms: Sequence[Term]) -> list[Hit]:
@@ -648,7 +578,7 @@ def scan_change(
         return hits, "binary"
     olds = [old_text(objects, object_id) for object_id in change.old_ids]
     added = added_lines(olds, text)
-    return hits + scan_text(change.path, text, terms, added=added), "scanned"
+    return hits + scan_added(change.path, text, terms, added), "scanned"
 
 
 def scan_commit(
@@ -661,9 +591,9 @@ def scan_commit(
     prefix = commit[:COMMIT_ID_SHORT]
     idents, message = commit_idents_and_message(root, commit)
     hits = scan_text("<message>", message, terms)
-    skip = (EMAIL_LABEL,) if trust_idents else ()
     for role, ident in idents:
-        hits.extend(scan_text(f"<{role}>", ident, terms, skip=skip))
+        found = scan_text(f"<{role}>", ident, terms)
+        hits.extend(h for h in found if not (trust_idents and h.label == EMAIL_LABEL))
     changes = commit_changes(root, commit)
     wanted = [c.new_id for c in changes]
     wanted += [i for c in changes for i in c.old_ids if not is_zero_id(i)]
@@ -681,6 +611,16 @@ def scan_commit(
     return ScanResult(shown, tally["scanned"], tally["binary"], oversize)
 
 
+def merge_results(results: Sequence[ScanResult]) -> ScanResult:
+    """One result for several: the hits sorted and each once, the counts added."""
+    return ScanResult(
+        sorted({hit for r in results for hit in r.hits}),
+        sum(r.scanned for r in results),
+        sum(r.binary for r in results),
+        [name for r in results for name in r.oversize],
+    )
+
+
 def scan_range(
     root: Path,
     selections: Sequence[Sequence[str]],
@@ -692,13 +632,7 @@ def scan_range(
     """
     commits = list(dict.fromkeys(c for s in selections for c in rev_list(root, s)))
     results = [scan_commit(root, commit, terms, trust_idents) for commit in commits]
-    merged = ScanResult(
-        sorted({hit for r in results for hit in r.hits}),
-        sum(r.scanned for r in results),
-        sum(r.binary for r in results),
-        [name for r in results for name in r.oversize],
-    )
-    return merged, len(commits)
+    return merge_results(results), len(commits)
 
 
 def range_selection(spec: str) -> list[str]:
@@ -798,6 +732,35 @@ def resolve_denylist(option: str | None) -> Path:
     return Path(chosen).expanduser()
 
 
+def add_source_options(parser: argparse.ArgumentParser) -> None:
+    """The options that say what to scan. Only one may be given."""
+    source = parser.add_mutually_exclusive_group()
+    source.add_argument(
+        "--staged",
+        action="store_true",
+        help="scan the staged copy of each file, which the next commit will "
+        "hold, instead of the files on disk (the pre-commit hook passes this)",
+    )
+    source.add_argument(
+        "--message",
+        type=Path,
+        metavar="FILE",
+        help="scan only this commit message file (the commit-msg hook passes this)",
+    )
+    source.add_argument(
+        "--range",
+        metavar="BASE..HEAD",
+        help="scan each commit in the range: its message, author, committer, "
+        "file names and added lines (make privacy and CI pass this)",
+    )
+    source.add_argument(
+        "--pre-push",
+        action="store_true",
+        help="scan the commits a push would send, from the ref lines on standard "
+        "input (the pre-push hook passes this)",
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Scan the repo for personal data.")
     parser.add_argument(
@@ -842,31 +805,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="also check the author and committer git will use (the pre-commit "
         "hook passes this; CI runners have no real identity to check)",
     )
-    source = parser.add_mutually_exclusive_group()
-    source.add_argument(
-        "--staged",
-        action="store_true",
-        help="scan the staged copy of each file, which the next commit will "
-        "hold, instead of the files on disk (the pre-commit hook passes this)",
-    )
-    source.add_argument(
-        "--message",
-        type=Path,
-        metavar="FILE",
-        help="scan only this commit message file (the commit-msg hook passes this)",
-    )
-    source.add_argument(
-        "--range",
-        metavar="BASE..HEAD",
-        help="scan each commit in the range: its message, author, committer, "
-        "file names and added lines (make privacy and CI pass this)",
-    )
-    source.add_argument(
-        "--pre-push",
-        action="store_true",
-        help="scan the commits a push would send, from the ref lines on standard "
-        "input (the pre-push hook passes this)",
-    )
+    add_source_options(parser)
     return parser
 
 
@@ -973,10 +912,15 @@ def run(args: argparse.Namespace) -> int:
     return 1 if hits else 0
 
 
+def reads_commits(args: argparse.Namespace) -> bool:
+    """Whether the options name commits to scan: --range or --pre-push."""
+    return args.range is not None or args.pre_push
+
+
 def main(argv: Iterable[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(None if argv is None else list(argv))
-    if args.trust_author_emails and args.range is None and not args.pre_push:
+    if args.trust_author_emails and not reads_commits(args):
         parser.error("--trust-author-emails needs --range or --pre-push")
     try:
         return run(args)
