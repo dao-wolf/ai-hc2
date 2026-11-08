@@ -50,8 +50,8 @@ any kind, exits 2, as does a file left unchecked for being too large. Exit 0
 and 1 happen only after the scan finished, and a finished scan ends with a
 summary line on stderr: `privacy gate: scanned ..., N hits.` A run that exits
 2 never prints that line.
-Standard library only. The generic checks live in privacy_gate_generic.py and the git reading in
-privacy_gate_git.py, both beside this file.
+Standard library only. The generic checks live in privacy_gate_generic.py and
+the git reading in privacy_gate_git.py, both beside this file.
 """
 
 from __future__ import annotations
