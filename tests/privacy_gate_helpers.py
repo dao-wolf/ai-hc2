@@ -81,8 +81,12 @@ class HookRepoTestCase(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.root = Path(tmp.name) / "repo"
         (self.root / "scripts").mkdir(parents=True)
-        for name in ["privacy_gate.py", "privacy_gate_generic.py", "install-hooks.sh"]:
-            shutil.copy(SCRIPT.parent / name, self.root / "scripts")
+        # The gate and the modules beside it, and the hook installer.
+        for path in [
+            *SCRIPT.parent.glob("privacy_gate*.py"),
+            *SCRIPT.parent.glob("*.sh"),
+        ]:
+            shutil.copy(path, self.root / "scripts")
         shutil.copy(SCRIPT.parent.parent / "Makefile", self.root)
         self.denylist = Path(tmp.name) / "denylist.txt"
         self.denylist.write_text(DENYLIST)
