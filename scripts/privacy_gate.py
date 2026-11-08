@@ -50,8 +50,8 @@ any kind, exits 2, as does a file left unchecked for being too large. Exit 0
 and 1 happen only after the scan finished, and a finished scan ends with a
 summary line on stderr: `privacy gate: scanned ..., N hits.` A run that exits
 2 never prints that line.
-Standard library only. The generic checks live in privacy_gate_generic.py, beside
-this file.
+Standard library only. The generic checks live in privacy_gate_generic.py and the git reading in
+privacy_gate_git.py, both beside this file.
 """
 
 from __future__ import annotations
@@ -63,7 +63,6 @@ import os
 import re
 import subprocess
 import sys
-from collections import Counter
 from collections.abc import Callable, Iterable, Iterator, Sequence, Set
 from dataclasses import dataclass
 from pathlib import Path
@@ -108,6 +107,16 @@ def load_sibling(stem: str) -> ModuleType:
 _generic = load_sibling("privacy_gate_generic")
 EMAIL_LABEL = _generic.EMAIL_LABEL
 generic_labels = _generic.generic_labels
+_git = load_sibling("privacy_gate_git")
+COMMIT_ID_RE = _git.COMMIT_ID_RE
+ScanError, Change, Push = _git.ScanError, _git.Change, _git.Push
+is_zero_id, git_output, rev_list = _git.is_zero_id, _git.git_output, _git.rev_list
+commit_parents, diff_tree = _git.commit_parents, _git.diff_tree
+common_changes, commit_changes = _git.common_changes, _git.commit_changes
+ident_of, added_lines = _git.ident_of, _git.added_lines
+commit_idents_and_message = _git.commit_idents_and_message
+range_selection, has_commit = _git.range_selection, _git.has_commit
+parse_push, pre_push_selections = _git.parse_push, _git.pre_push_selections
 
 # `git commit -v` adds the diff below this line of the message file, and git
 # drops it from the message. The gate drops it too, or the diff of a commit
@@ -117,19 +126,13 @@ SCISSORS_RE = re.compile(r"^\S+ -{24} >8 -{24}$", re.MULTILINE)
 # The first line git prints for an object read with `cat-file --batch`.
 OBJECT_HEADER_RE = re.compile(rb"[0-9a-f]+ [a-z]+ ([0-9]+)\n")
 
-# A commit id as git writes it (SHA-1 or SHA-256), and the all-zero id that git
-# uses for "no such object" in a pre-push hook and in a diff.
-COMMIT_ID_RE = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
+# How much of a commit id a hit shows.
 COMMIT_ID_SHORT = 10
 
 DENYLIST_NEXT_STEP = (
     "privacy gate: create your deny-list (see CONTRIBUTING.md). With none, "
     "run: make hooks GENERIC_ONLY=1"
 )
-
-
-class ScanError(Exception):
-    """The gate can't tell what it was asked to scan. The text is safe to print."""
 
 
 @dataclass(frozen=True, order=True)
@@ -428,132 +431,9 @@ def scan_identity(root: Path, terms: Sequence[Term]) -> list[Hit]:
     return sorted(set(hits))
 
 
-@dataclass(frozen=True)
-class Change:
-    """A file a commit adds or edits. `old_ids` holds its object id in each
-    parent of the commit, all zeros where that parent lacks it.
-    """
-
-    path: str
-    old_ids: tuple[bytes, ...]
-    new_id: bytes
-
-
-@dataclass(frozen=True)
-class Push:
-    """One line a pre-push hook is given."""
-
-    local_ref: str
-    local: str
-    remote_ref: str
-    remote: str
-
-
-def is_zero_id(object_id: bytes | str) -> bool:
-    return not object_id.strip(b"0" if isinstance(object_id, bytes) else "0")
-
-
 def prefixed(hits: Iterable[Hit], prefix: str) -> list[Hit]:
     """The hits with a commit id in front of each path."""
     return [Hit(f"{prefix}:{hit.path}", hit.line, hit.label) for hit in hits]
-
-
-def git_output(root: Path, *arguments: str) -> bytes:
-    """What a git command prints. Raises when it fails."""
-    command = ["git", "-C", str(root), *arguments]
-    return subprocess.run(command, capture_output=True, check=True).stdout
-
-
-def rev_list(root: Path, selection: Sequence[str]) -> list[str]:
-    """The ids of the commits a selection names, oldest first."""
-    return git_output(root, "rev-list", "--reverse", *selection, "--").decode().split()
-
-
-def commit_parents(root: Path, commit: str) -> list[str]:
-    """The ids of a commit's parents."""
-    line = git_output(root, "rev-list", "--parents", "-n", "1", commit, "--")
-    return line.decode().split()[1:]
-
-
-def diff_tree(root: Path, *trees: str) -> list[Change]:
-    """The files that differ between two trees, or that a commit adds or edits.
-    Deleted files and submodules are left out.
-    """
-    flags = ["-r", "-z", "--root", "--no-renames", "--no-commit-id"]
-    fields = git_output(root, "diff-tree", *flags, *trees, "--").split(b"\0")
-    changes: list[Change] = []
-    for info, name in zip(fields[0::2], fields[1::2], strict=False):
-        _old_mode, new_mode, old_id, new_id, status = info.split()
-        if status != b"D" and new_mode != b"160000":
-            changes.append(Change(os.fsdecode(name), (old_id,), new_id))
-    return changes
-
-
-def common_changes(per_parent: Sequence[Sequence[Change]]) -> list[Change]:
-    """The files of a merge that differ from every parent. A file equal to one
-    parent's came from that parent, so it is not new. Each keeps the id it had
-    in every parent.
-    """
-    by_path = [{change.path: change for change in changes} for changes in per_parent]
-    return [
-        Change(
-            change.path,
-            tuple(m[change.path].old_ids[0] for m in by_path),
-            change.new_id,
-        )
-        for change in per_parent[0]
-        if all(change.path in m for m in by_path)
-    ]
-
-
-def commit_changes(root: Path, commit: str) -> list[Change]:
-    """The files a commit adds or edits. A merge is compared with each parent,
-    so only what the merge itself brings is left. Deleted files and submodules
-    are left out.
-    """
-    parents = commit_parents(root, commit)
-    if len(parents) < 2:
-        return diff_tree(root, commit)
-    return common_changes([diff_tree(root, parent, commit) for parent in parents])
-
-
-def ident_of(line: bytes) -> str:
-    """ "Name <email>" from the rest of an author, committer or tagger line,
-    which ends with a time stamp and offset.
-    """
-    return line.decode("utf-8", "replace").rsplit(">", 1)[0] + ">"
-
-
-def commit_idents_and_message(
-    root: Path, commit: str
-) -> tuple[list[tuple[str, str]], str]:
-    """The author and committer of a commit as ("author", "Name <email>"), and
-    its message.
-    """
-    raw = git_output(root, "cat-file", "commit", commit)
-    header, _, body = raw.partition(b"\n\n")
-    idents: list[tuple[str, str]] = []
-    for line in header.split(b"\n"):
-        role, _, rest = line.partition(b" ")
-        if role in (b"author", b"committer"):
-            idents.append((role.decode(), ident_of(rest)))
-    return idents, body.decode("utf-8", "replace")
-
-
-def added_lines(olds: Sequence[str], new: str) -> frozenset[int]:
-    """The numbers of the lines of `new` that none of the old versions had. A
-    line that is repeated counts once for each time an old version had it.
-    """
-    known: Counter[str] = Counter()
-    for old in olds:
-        known |= Counter(old.split("\n"))
-    added: set[int] = set()
-    for number, line in enumerate(new.split("\n"), start=1):
-        if known[line] > 0:
-            known[line] -= 1
-        else:
-            added.add(number)
-    return frozenset(added)
 
 
 def old_text(objects: dict[bytes, bytes], object_id: bytes) -> str:
@@ -581,6 +461,14 @@ def scan_change(
     return hits + scan_added(change.path, text, terms, added), "scanned"
 
 
+def ident_hits(path: str, ident: str, terms: Sequence[Term], trust: bool) -> list[Hit]:
+    """The hits in an author or committer. When `trust` is set the generic email
+    check is left out; every other check still runs.
+    """
+    hits = scan_text(path, ident, terms)
+    return [h for h in hits if not (trust and h.label == EMAIL_LABEL)]
+
+
 def scan_commit(
     root: Path, commit: str, terms: Sequence[Term], trust_idents: bool
 ) -> ScanResult:
@@ -592,8 +480,7 @@ def scan_commit(
     idents, message = commit_idents_and_message(root, commit)
     hits = scan_text("<message>", message, terms)
     for role, ident in idents:
-        found = scan_text(f"<{role}>", ident, terms)
-        hits.extend(h for h in found if not (trust_idents and h.label == EMAIL_LABEL))
+        hits.extend(ident_hits(f"<{role}>", ident, terms, trust_idents))
     changes = commit_changes(root, commit)
     wanted = [c.new_id for c in changes]
     wanted += [i for c in changes for i in c.old_ids if not is_zero_id(i)]
@@ -633,46 +520,6 @@ def scan_range(
     commits = list(dict.fromkeys(c for s in selections for c in rev_list(root, s)))
     results = [scan_commit(root, commit, terms, trust_idents) for commit in commits]
     return merge_results(results), len(commits)
-
-
-def range_selection(spec: str) -> list[str]:
-    """What `git rev-list` is asked for by --range: two refs joined by dots."""
-    if ".." not in spec or spec.startswith("-"):
-        raise ScanError(
-            "privacy gate: --range needs BASE..HEAD (two refs joined by '..')."
-        )
-    return [spec]
-
-
-def has_commit(root: Path, commit: str) -> bool:
-    command = ["git", "-C", str(root), "cat-file", "-e", f"{commit}^{{commit}}"]
-    return subprocess.run(command, capture_output=True).returncode == 0
-
-
-def parse_push(line: str) -> Push:
-    """Read one line a pre-push hook is given:
-    `<local ref> <local id> <remote ref> <remote id>`.
-    """
-    fields = line.split()
-    if len(fields) != 4 or not all(COMMIT_ID_RE.fullmatch(i) for i in fields[1::2]):
-        raise ScanError("privacy gate: could not read the refs git is pushing.")
-    return Push(*fields)
-
-
-def pre_push_selections(root: Path, pushes: Iterable[Push]) -> list[list[str]]:
-    """Which commits a push sends. A deleted ref sends none. A new ref, or one
-    whose old tip this clone lacks, sends every commit that no remote-tracking
-    branch has. Any other sends everything from the old tip to the new one.
-    """
-    selections: list[list[str]] = []
-    for push in pushes:
-        if is_zero_id(push.local):
-            continue
-        if is_zero_id(push.remote) or not has_commit(root, push.remote):
-            selections.append([push.local, "--not", "--remotes"])
-        else:
-            selections.append([f"{push.remote}..{push.local}"])
-    return selections
 
 
 def tag_hits(root: Path, object_id: str, terms: Sequence[Term]) -> list[Hit]:
