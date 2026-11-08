@@ -65,7 +65,7 @@ strict = true
 files = ["src"]
 
 [tool.mutmut]
-source_paths = ["scripts/privacy_gate.py"]
+source_paths = ["scripts/privacy_gate.py", "scripts/privacy_gate_generic.py"]
 # Kept by hand: add each new tests/test_privacy_gate_*.py file here, except
 # test_privacy_gate_hooks.py and test_privacy_gate_make.py, which run real hooks
 # and make (see the deselect below).

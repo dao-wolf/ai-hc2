@@ -489,7 +489,7 @@ class AddedLinesTests(RangeRepoTestCase):
         terms = gate.parse_terms(DENYLIST)
 
         def lines(text: str, added: set[int]) -> list[int]:
-            return [h.line for h in gate.scan_text("f", text, terms, added=added)]
+            return [h.line for h in gate.scan_added("f", text, terms, added)]
 
         self.assertEqual(lines("quentin\nexample\n", {2}), [1])
         self.assertEqual(lines("quentin\nexample\n", {1}), [1])
