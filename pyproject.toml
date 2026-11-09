@@ -81,6 +81,7 @@ pytest_add_cli_args_test_selection = [
     "tests/test_privacy_gate_files.py",
     "tests/test_privacy_gate_home_paths.py",
     "tests/test_privacy_gate_identity.py",
+    "tests/test_privacy_gate_loader.py",
     "tests/test_privacy_gate_range.py",
     "tests/test_privacy_gate_range_cases.py",
     "tests/test_privacy_gate_skipped.py",
