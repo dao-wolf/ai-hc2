@@ -67,6 +67,7 @@ from collections.abc import Callable, Iterable, Iterator, Sequence, Set
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
+from typing import NoReturn
 
 ENV_DENYLIST = "HC2_PRIVACY_DENYLIST"
 DEFAULT_DENYLIST = "~/.config/ai-hc2/privacy-denylist.txt"
@@ -88,19 +89,33 @@ NAME_SEPARATORS = r"[\s_./-]+"
 BETWEEN_WORDS_RE = re.compile(rf"(?<=[^\s_-]){SEPARATORS}(?=[^\s_-])")
 
 
+def cannot_load(stem: str) -> NoReturn:
+    """Exit 2 with a plain message, as the gate does for its other failures."""
+    print(
+        f"privacy gate: cannot load {stem}.py. Keep it beside privacy_gate.py.",
+        file=sys.stderr,
+    )
+    raise SystemExit(2)
+
+
 def load_sibling(stem: str) -> ModuleType:
     """Load scripts/<stem>.py by its path. A hook or `python3 -I` leaves this
-    script's folder off sys.path, so a plain import would not find it.
+    script's folder off sys.path, so a plain import would not find it. A file
+    that is missing or cannot be read stops the gate with exit 2.
     """
     name = f"scripts.{stem}"
     if name not in sys.modules:
         path = Path(__file__).resolve().parent / f"{stem}.py"
         spec = importlib.util.spec_from_file_location(name, path)
         if spec is None or spec.loader is None:
-            raise ImportError(f"privacy gate: cannot load {stem}.py")
+            cannot_load(stem)
         module = importlib.util.module_from_spec(spec)
         sys.modules[name] = module
-        spec.loader.exec_module(module)
+        try:
+            spec.loader.exec_module(module)
+        except OSError:
+            del sys.modules[name]
+            cannot_load(stem)
     return sys.modules[name]
 
 
