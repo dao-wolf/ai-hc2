@@ -43,17 +43,22 @@ def fresh_load(stem: str) -> tuple[ModuleType, str]:
     return module, err.getvalue()
 
 
-def exit_of(stem: str) -> tuple[object, str, bool]:
-    """Call load_sibling on a stem and return the exit code, what it printed and
-    whether the stem was left in sys.modules."""
+def exit_of(
+    stem: str, *patches: contextlib.AbstractContextManager[object]
+) -> tuple[object, str, bool]:
+    """Call load_sibling on a stem, with any patches applied, and return the exit
+    code, what it printed and whether the stem was left in sys.modules."""
     err = io.StringIO()
     code: object = None
     with mock.patch.dict(sys.modules), contextlib.redirect_stderr(err):
         sys.modules.pop(f"scripts.{stem}", None)
-        try:
-            gate.load_sibling(stem)
-        except SystemExit as stop:
-            code = stop.code
+        with contextlib.ExitStack() as stack:
+            for patch in patches:
+                stack.enter_context(patch)
+            try:
+                gate.load_sibling(stem)
+            except SystemExit as stop:
+                code = stop.code
         left = f"scripts.{stem}" in sys.modules
     return code, err.getvalue(), left
 
@@ -95,56 +100,23 @@ class LoadSiblingTests(unittest.TestCase):
         _, _, left = exit_of(MISSING)
         self.assertFalse(left)
 
-    def test_a_script_with_no_loader_exits_2_with_the_same_message(self) -> None:
-        err = io.StringIO()
-        with (
-            mock.patch.dict(sys.modules),
-            mock.patch.object(
-                gate.importlib.util, "spec_from_file_location", return_value=None
-            ),
-            contextlib.redirect_stderr(err),
-            self.assertRaises(SystemExit) as stop,
-        ):
-            sys.modules.pop(f"scripts.{GENERIC}", None)
-            gate.load_sibling(GENERIC)
-        self.assertEqual(stop.exception.code, 2)
-        self.assertEqual(
-            err.getvalue(),
-            refusal(GENERIC),
-        )
+    def test_a_spec_with_no_loader_exits_2_with_the_same_message(self) -> None:
+        for spec in [None, mock.Mock(loader=None)]:
+            with self.subTest(spec=spec):
+                patch = mock.patch.object(
+                    gate.importlib.util, "spec_from_file_location", return_value=spec
+                )
+                code, err, left = exit_of(GENERIC, patch)
+                self.assertEqual((code, err, left), (2, refusal(GENERIC), False))
 
-    def test_a_spec_with_no_loader_exits_2(self) -> None:
-        spec = mock.Mock(loader=None)
-        err = io.StringIO()
-        with (
-            mock.patch.dict(sys.modules),
-            mock.patch.object(
-                gate.importlib.util, "spec_from_file_location", return_value=spec
-            ),
-            contextlib.redirect_stderr(err),
-            self.assertRaises(SystemExit) as stop,
-        ):
-            sys.modules.pop(f"scripts.{GENERIC}", None)
-            gate.load_sibling(GENERIC)
-        self.assertEqual(stop.exception.code, 2)
-        self.assertIn("cannot load", err.getvalue())
-
-    def test_an_unreadable_sibling_exits_2(self) -> None:
+    def test_an_unreadable_sibling_exits_2_and_is_not_left_loaded(self) -> None:
         for failure in [FileNotFoundError(), PermissionError(), IsADirectoryError()]:
             with self.subTest(failure=type(failure).__name__):
-                with (
-                    mock.patch.dict(sys.modules),
-                    mock.patch.object(
-                        SourceFileLoader,
-                        "exec_module",
-                        side_effect=failure,
-                    ),
-                    contextlib.redirect_stderr(io.StringIO()),
-                    self.assertRaises(SystemExit) as stop,
-                ):
-                    sys.modules.pop(f"scripts.{GENERIC}", None)
-                    gate.load_sibling(GENERIC)
-                self.assertEqual(stop.exception.code, 2)
+                patch = mock.patch.object(
+                    SourceFileLoader, "exec_module", side_effect=failure
+                )
+                code, err, left = exit_of(GENERIC, patch)
+                self.assertEqual((code, err, left), (2, refusal(GENERIC), False))
 
 
 class CopiedAloneTests(unittest.TestCase):
