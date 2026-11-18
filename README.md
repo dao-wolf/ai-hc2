@@ -1,6 +1,8 @@
 # AI HC2
 
-![AI HC2: a person at a grey robot whose face is a status panel, with four AI harness boxes on two crossing rings](docs/hero.svg)
+![AI HC2: a person at a grey robot whose face is a status panel, with AI harness boxes on two crossing rings. Grey arrows show reading, which version 0.0.1 does. Blue arrows back to the harnesses show steering, which is planned.](docs/hero.svg)
+
+*The picture shows the aim. The grey arrows are what 0.0.1 does: it reads from the harnesses, and you run commands and read the findings. The blue arrows, from HC2 back to the harnesses, are planned (slice S6).*
 
 **A local command centre that shows what the AI tools on your machine are doing.**
 
@@ -22,13 +24,15 @@ See [what is planned](#planned) and the [delivery slices](docs/slices.md) for th
 | You want to know | Command | What you get |
 |---|---|---|
 | Which sessions are there? | `hc2 sessions` | Every session found, running or ended, with its harness, state, last activity, model, title and folder. Use `--state` to filter. |
-| What is it using? | `hc2 resources` | Memory pressure, swap, load and heat, the biggest process trees, and any findings. |
+| What is using memory and CPU? | `hc2 resources` | Memory pressure, swap, load and heat, the biggest process trees, and any findings. |
 | What needs fixing? | `hc2 status` | An overall level (green, amber or red) and findings, each with a plain-English title and a suggested fix. |
 | Is anything installed? | `hc2 status` | Whether each harness is installed, with its running and stale session counts. |
 | Is HC2 set up? | `hc2 doctor` | A check of the Python version and of HC2's config and state folders. |
 | Want a fresh scan? | `hc2 scan` | Reads everything again, stores the result and prints the status. |
 
-`status` and `sessions` show the latest stored scan. If there is none, they scan first. `resources` takes a fresh reading each time and stores nothing. HC2 records each installed harness's version in the stored scan, but no command shows it yet.
+HC2 cannot tell whether a Cowork session is running, so open Cowork sessions show as unknown.
+
+`status` and `sessions` show the latest stored scan. If there is none, they scan first. `resources` takes a fresh reading each time and stores nothing. It uses the built-in thresholds and leaves out the two session rules (idle sessions and busy but quiet), which only `scan` applies, together with your config. HC2 records each installed harness's version in the stored scan, but no command shows it yet.
 
 The findings come from rules that are plain code, not an LLM. The resource rules cover memory pressure, idle sessions that hold memory, sessions that look busy but are quiet, leftover processes, several test jobs at once, duplicate MCP servers, runaway child processes and oversized app renderers. Other findings flag a harness HC2 could not read, an invalid or changed config, and a damaged audit log.
 
@@ -60,13 +64,13 @@ All values here are made up. This is what `doctor` prints once both folders exis
 
 ```text
 AI HC2 doctor (version 0.0.1)
-  OK    Python 3.11.4 is new enough (3.11 or later).
+  OK    Python 3.12.0 is new enough (3.11 or later).
   OK    The config folder exists: ~/.config/ai-hc2
   OK    The state folder exists: ~/.local/state/ai-hc2
 Everything looks fine.
 ```
 
-On a new machine, `doctor` shows a NOTE for a folder that does not exist yet. A scan creates the state folder. Create the config folder yourself if you want a config file.
+On a new machine, `doctor` shows a NOTE for a folder that does not exist yet. A scan creates the state folder. You only need the config folder if you add a config file, and you create it yourself.
 
 And this is `status`, which lists every harness it checks:
 
@@ -89,7 +93,7 @@ Harnesses:
 
 1. **Deterministic first.** Plain code gathers, analyses and displays the data. The same inputs give the same outputs. No LLM runs inside a scan.
 2. **Local only.** Version 0.0.1 makes no network calls and opens no port. Anything later that uses the network will be opt-in, and any server will bind to 127.0.0.1 only.
-3. **Metadata only.** HC2 keeps only metadata fields, such as a session's folder, times, title and model. It reads only the start and end of each session file and drops everything else in memory, so message text is never stored, shown or sent. Confidential folders are masked, and secrets are redacted before a scan is stored or shown.
+3. **Metadata only.** HC2 keeps only metadata fields, such as a session's folder, times, title and model. Every read is bounded: Claude Code transcripts are read only at their first 64 KB and last 256 KB, and from the desktop and Cowork session files only the listed fields are kept. Everything else is dropped in memory, so message text is never stored, shown or sent. Confidential folders are masked, and secrets are redacted before a scan is stored or shown.
 4. **A person decides.** Today HC2 only reads and suggests. When actions arrive, rules, LLMs and people will be able to propose them, and only a person will approve them. Each scan is written to a local audit log.
 
 ## Architecture
@@ -104,7 +108,7 @@ Three [C4](https://c4model.com) views of version 0.0.1. Solid boxes exist today.
 
 ![C4 level 2: the containers of AI HC2](docs/architecture/c4-2-containers.svg)
 
-**Components:** inside the `hc2` package. Each harness plugs in through one interface, the `Adapter` protocol. The process and system readers plug in through another, the `Collector` function. The rules are pure functions from collected facts to findings.
+**Components:** inside the `hc2` package. Each harness plugs in through one interface, the `Adapter` protocol. The process and system readers plug in through another, the `Collector` function. The rules are pure functions from collected facts to findings. One command, `hc2 resources`, skips the scan service and calls the collectors and rules directly. That path is not drawn.
 
 ![C4 level 3: the components of the hc2 package](docs/architecture/c4-3-components.svg)
 
