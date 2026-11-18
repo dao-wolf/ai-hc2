@@ -1,5 +1,7 @@
 # AI HC2
 
+![AI HC2: a person at a grey robot whose face is a status panel, with four AI harness boxes on two crossing rings](docs/hero.svg)
+
 **A local command centre that shows what the AI tools on your machine are doing.**
 
 AI HC2 (AI Harness Command Center) gives a developer one place to look at their AI harnesses. A harness is a tool that runs an AI agent or chat, such as Claude Code. HC2 takes only metadata from each harness's local files, never the content of your conversations, and tells you in plain English what is running, what is using your memory and what needs fixing.
